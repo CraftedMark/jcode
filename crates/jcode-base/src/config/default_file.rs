@@ -171,6 +171,11 @@ persist_memory_injections = false
 # Set to "main" for bleeding edge updates every time code is pushed
 update_channel = "stable"
 
+[memory]
+# Store all memories in one global file instead of separate per-project files.
+# This makes every workspace read/write ~/.jcode/memory/global.json.
+unified = false
+
 [websearch]
 # Preferred websearch engine: "duckduckgo", "bing", or "searxng".
 engine = "duckduckgo"
