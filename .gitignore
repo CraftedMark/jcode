@@ -7,6 +7,9 @@ ios_simulator_screenshot.png
 # Local onboarding sandbox + auth fixtures. May contain REAL OAuth tokens copied
 # from $HOME (see scripts/onboarding_sandbox.sh seed-real-logins). Never commit.
 /.tmp/
+/.DS_Store
+/.jcode/*
+!/.jcode/generated-images/
 /.jcode/generated-images/
 /telemetry-worker/backups/
 target-ttest/
