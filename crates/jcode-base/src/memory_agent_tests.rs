@@ -1,6 +1,74 @@
 use super::*;
 use crate::memory::MemoryCategory;
 
+fn user_msg(text: &str) -> crate::message::Message {
+    crate::message::Message {
+        role: crate::message::Role::User,
+        content: vec![crate::message::ContentBlock::Text {
+            text: text.to_string(),
+            cache_control: None,
+        }],
+        timestamp: None,
+        tool_duration_ms: None,
+    }
+}
+
+fn assistant_msg(text: &str) -> crate::message::Message {
+    crate::message::Message {
+        role: crate::message::Role::Assistant,
+        content: vec![crate::message::ContentBlock::Text {
+            text: text.to_string(),
+            cache_control: None,
+        }],
+        timestamp: None,
+        tool_duration_ms: None,
+    }
+}
+
+#[test]
+fn detect_keyword_trigger_matches_preference_phrase() {
+    let messages = vec![
+        assistant_msg("hello"),
+        user_msg("By the way, I prefer Rust over Go for systems code."),
+    ];
+    let hit = detect_keyword_trigger(&messages);
+    assert!(hit.is_some(), "expected keyword match, got None");
+    let kw = hit.unwrap().to_lowercase();
+    assert!(
+        kw.contains("i prefer"),
+        "expected `i prefer` match, got {kw:?}"
+    );
+}
+
+#[test]
+fn detect_keyword_trigger_is_case_insensitive() {
+    let messages = vec![user_msg("REMEMBER THAT we deploy on Fridays only.")];
+    assert!(detect_keyword_trigger(&messages).is_some());
+}
+
+#[test]
+fn detect_keyword_trigger_only_scans_last_user_message() {
+    let messages = vec![
+        user_msg("I prefer dark mode."),
+        assistant_msg("ok"),
+        user_msg("what time is it?"),
+    ];
+    assert!(detect_keyword_trigger(&messages).is_none());
+}
+
+#[test]
+fn detect_keyword_trigger_returns_none_on_neutral_message() {
+    let messages = vec![user_msg("How does the cache work?")];
+    assert!(detect_keyword_trigger(&messages).is_none());
+}
+
+#[test]
+fn cfg_min_turns_uses_fallback_when_zero() {
+    assert!(MIN_TURNS_FOR_EXTRACTION_FALLBACK >= 1);
+    assert!(PERIODIC_EXTRACTION_INTERVAL_FALLBACK >= 1);
+    assert!(PERIODIC_EXTRACTION_INTERVAL_FALLBACK >= MIN_TURNS_FOR_EXTRACTION_FALLBACK);
+}
+
 #[test]
 fn infer_candidate_tag_uses_repeated_non_stopword() {
     let tag =

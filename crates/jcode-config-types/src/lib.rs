@@ -946,7 +946,7 @@ impl Default for WebSearchConfig {
 }
 
 /// Memory storage configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MemoryConfig {
     /// Store all memories in the global graph instead of per-project graph files.
@@ -954,6 +954,99 @@ pub struct MemoryConfig {
     /// When enabled, project-scoped memory reads/writes resolve to
     /// `~/.jcode/memory/global.json`, giving the user one unified memory file.
     pub unified: bool,
+
+    /// Minimum number of turns since the last extraction before a topic-change
+    /// or keyword-triggered extraction is allowed to run.
+    ///
+    /// Lower = memories captured more eagerly. Default: 2.
+    pub min_turns_for_extraction: usize,
+
+    /// Run a periodic incremental extraction every N turns, even without a
+    /// topic change. This ensures memories are captured during long
+    /// single-topic sessions. Default: 4.
+    pub periodic_extraction_interval: usize,
+
+    /// When true, jcode scans the latest user message for memory-worthy
+    /// keywords (preferences, decisions, facts about the user) and, if a
+    /// match is found and `min_turns_for_extraction` has elapsed, triggers
+    /// an immediate extraction without waiting for the periodic interval.
+    /// Default: true.
+    pub keyword_trigger_enabled: bool,
+
+    /// Lowercased substrings that, when found in a user message, trigger
+    /// an immediate memory extraction. Matching is case-insensitive and
+    /// substring-based (no regex). Override to customize.
+    pub keyword_triggers: Vec<String>,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            unified: false,
+            min_turns_for_extraction: 2,
+            periodic_extraction_interval: 4,
+            keyword_trigger_enabled: true,
+            keyword_triggers: default_memory_keyword_triggers(),
+        }
+    }
+}
+
+/// Default phrases that indicate a memory-worthy statement from the user.
+/// Substring matched (lowercase). Kept short and high-precision to avoid
+/// firing on incidental prose.
+pub fn default_memory_keyword_triggers() -> Vec<String> {
+    [
+        // Preferences
+        "i prefer",
+        "i like",
+        "i don't like",
+        "i dont like",
+        "i hate",
+        "i love",
+        "my favorite",
+        "my favourite",
+        // Identity / facts about the user
+        "i am ",
+        "i'm ",
+        "im a ",
+        "my name is",
+        "call me ",
+        "i live in",
+        "i work at",
+        "i work on",
+        "i use ",
+        "i always",
+        "i never",
+        "i usually",
+        // Decisions / rules / instructions to remember
+        "remember that",
+        "remember this",
+        "please remember",
+        "don't forget",
+        "dont forget",
+        "make a note",
+        "note that",
+        "fyi",
+        "for future reference",
+        "from now on",
+        "going forward",
+        "let's decide",
+        "we decided",
+        "the convention is",
+        "the rule is",
+        "always ",
+        "never ",
+        // Project facts
+        "this project uses",
+        "this repo uses",
+        "this codebase uses",
+        "we use ",
+        "we don't use",
+        "we dont use",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

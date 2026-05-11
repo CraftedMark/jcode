@@ -285,12 +285,72 @@ enum AgentMessage {
     Reset,
 }
 
-/// Minimum turns before we consider extracting on topic change
-const MIN_TURNS_FOR_EXTRACTION: usize = 4;
+/// Fallback minimum turns before we consider extracting on topic change.
+/// Used only when the config-supplied value is 0. Real default lives in
+/// `MemoryConfig::default()` in `jcode-config-types`.
+const MIN_TURNS_FOR_EXTRACTION_FALLBACK: usize = 2;
 
-/// Trigger a periodic incremental extraction every N turns, even without a topic change.
-/// This ensures memories are captured during long single-topic sessions.
-const PERIODIC_EXTRACTION_INTERVAL: usize = 12;
+/// Fallback periodic extraction interval. Used only when the config-supplied
+/// value is 0. Real default lives in `MemoryConfig::default()`.
+const PERIODIC_EXTRACTION_INTERVAL_FALLBACK: usize = 4;
+
+/// Read the configured min-turns-for-extraction, falling back if unset/zero.
+fn cfg_min_turns_for_extraction() -> usize {
+    let v = crate::config::config().memory.min_turns_for_extraction;
+    if v == 0 {
+        MIN_TURNS_FOR_EXTRACTION_FALLBACK
+    } else {
+        v
+    }
+}
+
+/// Read the configured periodic-extraction interval, falling back if unset/zero.
+fn cfg_periodic_extraction_interval() -> usize {
+    let v = crate::config::config().memory.periodic_extraction_interval;
+    if v == 0 {
+        PERIODIC_EXTRACTION_INTERVAL_FALLBACK
+    } else {
+        v
+    }
+}
+
+/// Scan the most recent user message in `messages` for any configured
+/// memory-trigger keyword. Returns the matched keyword if found.
+///
+/// Matching is case-insensitive substring matching against the lowercased
+/// concatenation of text blocks in the last user message.
+pub fn detect_keyword_trigger(messages: &[crate::message::Message]) -> Option<String> {
+    let cfg = &crate::config::config().memory;
+    if !cfg.keyword_trigger_enabled || cfg.keyword_triggers.is_empty() {
+        return None;
+    }
+
+    // Find the latest user message.
+    let last_user = messages
+        .iter()
+        .rev()
+        .find(|m| matches!(m.role, crate::message::Role::User))?;
+
+    let mut buf = String::new();
+    for block in &last_user.content {
+        if let crate::message::ContentBlock::Text { text, .. } = block {
+            buf.push_str(text);
+            buf.push(' ');
+        }
+    }
+    if buf.trim().is_empty() {
+        return None;
+    }
+    let haystack = buf.to_lowercase();
+
+    cfg.keyword_triggers
+        .iter()
+        .find(|needle| {
+            let n = needle.trim();
+            !n.is_empty() && haystack.contains(&n.to_lowercase())
+        })
+        .cloned()
+}
 
 /// Skip repeated relevance checks when the formatted context is unchanged.
 const RELEVANCE_CONTEXT_REPEAT_SUPPRESSION_SECS: u64 = 30;
@@ -550,7 +610,7 @@ impl MemoryAgent {
                     );
 
                     // Extract memories from the PREVIOUS topic before moving on
-                    if ss.turns_since_extraction >= MIN_TURNS_FOR_EXTRACTION {
+                    if ss.turns_since_extraction >= cfg_min_turns_for_extraction() {
                         if let Some(prev_context) = ss.last_context_string.clone() {
                             crate::logging::info(&format!(
                                 "[{}] Triggering incremental extraction ({} turns since last)",
@@ -583,9 +643,10 @@ impl MemoryAgent {
         }
 
         // Periodic extraction: even without topic change, extract every N turns
+        let mut periodic_fired = false;
         {
             let ss = self.session_state(session_id);
-            if ss.turns_since_extraction >= PERIODIC_EXTRACTION_INTERVAL {
+            if ss.turns_since_extraction >= cfg_periodic_extraction_interval() {
                 let extraction_ctx = memory::format_context_for_extraction(&messages);
                 if extraction_ctx.len() >= 200 {
                     crate::logging::info(&format!(
@@ -598,6 +659,39 @@ impl MemoryAgent {
                     let _ = ss;
                     self.extract_from_context(session_id, &extraction_ctx, "periodic")
                         .await;
+                    periodic_fired = true;
+                }
+            }
+        }
+
+        // Keyword-triggered extraction: if the latest user message contains
+        // a memory-worthy phrase (preferences, decisions, facts) and we have
+        // at least `min_turns_for_extraction` turns of context since the
+        // last extraction, fire an immediate extraction without waiting for
+        // the periodic interval. Skipped if the periodic branch already ran.
+        if !periodic_fired {
+            let min_turns = cfg_min_turns_for_extraction();
+            let should_check = {
+                let ss = self.session_state(session_id);
+                ss.turns_since_extraction >= min_turns
+            };
+            if should_check {
+                if let Some(matched) = detect_keyword_trigger(&messages) {
+                    let extraction_ctx = memory::format_context_for_extraction(&messages);
+                    if extraction_ctx.len() >= 80 {
+                        let turns_since = self.session_state(session_id).turns_since_extraction;
+                        crate::logging::info(&format!(
+                            "[{}] Triggering keyword-based extraction (matched={:?}, {} turns since last, {} chars context)",
+                            session_id,
+                            matched,
+                            turns_since,
+                            extraction_ctx.len()
+                        ));
+                        self.session_state(session_id).turns_since_extraction = 0;
+                        let reason = format!("keyword:{}", matched.trim());
+                        self.extract_from_context(session_id, &extraction_ctx, &reason)
+                            .await;
+                    }
                 }
             }
         }
