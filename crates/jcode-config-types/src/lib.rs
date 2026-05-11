@@ -441,7 +441,7 @@ pub struct AuthConfig {
 }
 
 /// Agent-specific model defaults.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AgentsConfig {
     /// Optional default model override for spawned swarm/subagent sessions.
@@ -461,6 +461,10 @@ pub struct AgentsConfig {
     /// Optional default model override for the memory sidecar.
     pub memory_model: Option<String>,
     /// Whether memory should use the sidecar for relevance/extraction.
+    ///
+    /// Defaults to `true` — without the sidecar, memory can only do embedding
+    /// similarity *recall*, not LLM-driven *extraction* of new memories from
+    /// the conversation. Most users want extraction on.
     pub memory_sidecar_enabled: bool,
     /// Minimum turns between Mode-2 memory reranks (cadence floor). The
     /// expensive listwise LLM rerank runs at most once per this many turns;
@@ -594,6 +598,16 @@ impl Default for HooksConfig {
             pre_tool: None,
             post_tool: None,
             pre_tool_timeout_ms: 5000,
+        }
+    }
+}
+
+impl Default for AgentsConfig {
+    fn default() -> Self {
+        Self {
+            swarm_model: None,
+            memory_model: None,
+            memory_sidecar_enabled: true,
         }
     }
 }
