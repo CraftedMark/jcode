@@ -25,3 +25,11 @@
 - On Windows, the equivalents are `%LOCALAPPDATA%\\jcode\\bin\\jcode.exe` for the launcher, `%LOCALAPPDATA%\\jcode\\builds\\stable\\jcode.exe` for stable, and `%LOCALAPPDATA%\\jcode\\builds\\versions\\<version>\\jcode.exe` for immutable installs; `scripts/install.ps1` currently installs the stable channel.
 - Ensure `~/.local/bin` is **before** `~/.cargo/bin` in `PATH`.
 
+## Updating This Fork Against Upstream
+
+- `scripts/update-fork.sh` — one-shot upstream sync + rebase + rebuild.
+  - Backs up `~/.jcode/{config.toml,memory,skills}` to `~/jcode-backups/` first.
+  - Fetches `origin` (upstream `1jehuang/jcode`), rebases local commits, pushes to `fork`, and rebuilds via `scripts/install_release.sh --fast`.
+  - Flags: `--dry-run`, `--no-push`, `--no-build`, `--lto`.
+  - User customizations (config, memory, skills) are never touched by any installer; this script only updates the binary.
+
