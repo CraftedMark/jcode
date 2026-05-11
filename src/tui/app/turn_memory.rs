@@ -95,7 +95,7 @@ impl App {
 
     /// Get memory prompt using async non-blocking approach
     /// Takes any pending memory from background check and sends context to memory agent for next turn
-    pub(in crate::tui::app) fn build_memory_prompt_nonblocking(
+    pub(in crate::tui::app) async fn build_memory_prompt_nonblocking(
         &self,
         messages: &[Message],
     ) -> Option<crate::memory::PendingMemory> {
@@ -110,7 +110,8 @@ impl App {
             None
         };
 
-        // Send context to memory agent for the NEXT turn (doesn't block current send)
+        // Always send context to the memory agent so it can pre-warm the
+        // next turn (this is fire-and-forget and never blocks).
         let shared_messages: std::sync::Arc<[crate::message::Message]> = messages.to_vec().into();
         crate::memory_agent::update_context_sync_with_dir(
             &self.session.id,
@@ -118,8 +119,50 @@ impl App {
             self.session.working_dir.clone(),
         );
 
-        // Return pending memory from previous turn
-        pending
+        if pending.is_some() {
+            // Pre-warmed result was ready; just use it.
+            return pending;
+        }
+
+        // No pre-warmed memory. Decide whether to block briefly before the
+        // first model call so the prompt gets memory context.
+        let cfg = &crate::config::config().memory;
+        let should_block = match cfg.block_mode {
+            crate::config::MemoryBlockMode::Never => false,
+            crate::config::MemoryBlockMode::FirstTurnOnly => self.is_first_user_turn(messages),
+            crate::config::MemoryBlockMode::Always => true,
+        };
+        if !should_block || !crate::message::ends_with_fresh_user_turn(messages) {
+            return None;
+        }
+
+        let timeout = std::time::Duration::from_millis(cfg.block_timeout_ms.max(1));
+        let manager = self
+            .session
+            .working_dir
+            .as_deref()
+            .map(|dir| {
+                crate::memory::MemoryManager::new()
+                    .with_project_dir(dir)
+                    .with_skills(self.active_skill.is_none())
+            })
+            .unwrap_or_else(|| {
+                crate::memory::MemoryManager::new().with_skills(self.active_skill.is_none())
+            });
+
+        crate::logging::info(&format!(
+            "Blocking on memory fetch for first turn (timeout={}ms)",
+            timeout.as_millis()
+        ));
+        manager
+            .fetch_relevant_blocking(&self.session.id, messages, timeout, None)
+            .await
+    }
+
+    /// Heuristic: returns true if `messages` looks like the user's very first
+    /// turn in this session. We treat "no assistant messages yet" as first.
+    fn is_first_user_turn(&self, messages: &[Message]) -> bool {
+        !messages.iter().any(|m| matches!(m.role, Role::Assistant))
     }
 
     /// Extract and store memories from the session transcript at end of session
