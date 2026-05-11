@@ -579,6 +579,16 @@ impl Tool for BashTool {
     }
 
     async fn execute(&self, input: Value, ctx: ToolContext) -> Result<ToolOutput> {
+        // Run user PreToolUse hooks before parsing or executing. Hooks may
+        // rewrite the input (e.g. prepend `rtk ` for token-savings). The
+        // matcher convention matches Claude Code / Codex: tool name is "Bash".
+        let input = crate::hooks::apply_pre_tool_use(
+            "Bash",
+            input,
+            ctx.working_dir.as_deref().map(std::path::Path::new),
+        )
+        .await;
+
         let mut params: BashInput = serde_json::from_value(input)?;
         let run_in_background = params.run_in_background.unwrap_or(false);
 
