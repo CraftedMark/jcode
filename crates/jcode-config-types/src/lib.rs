@@ -945,6 +945,26 @@ impl Default for WebSearchConfig {
     }
 }
 
+/// Controls when jcode blocks (briefly, with timeout) to fetch memory
+/// before sending a user prompt to the LLM.
+///
+/// `FirstTurnOnly` is the default: on the very first turn of a session
+/// there is no pre-warmed background memory, so the LLM would otherwise
+/// see your first prompt with zero memory context. Blocking briefly here
+/// catches that case while leaving subsequent turns purely non-blocking
+/// (the background memory agent has time to pre-warm between turns).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryBlockMode {
+    /// Never block. Memory only appears starting on turn 2+ (legacy behavior).
+    Never,
+    /// Block on the first turn of a session only. (Default.)
+    #[default]
+    FirstTurnOnly,
+    /// Block on every fresh user turn (until pre-warmed result is ready).
+    Always,
+}
+
 /// Memory storage configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -977,6 +997,15 @@ pub struct MemoryConfig {
     /// an immediate memory extraction. Matching is case-insensitive and
     /// substring-based (no regex). Override to customize.
     pub keyword_triggers: Vec<String>,
+
+    /// When to block briefly fetching memory before sending a prompt.
+    /// See `MemoryBlockMode` for details. Default: `FirstTurnOnly`.
+    pub block_mode: MemoryBlockMode,
+
+    /// Maximum time to wait for a synchronous memory fetch before giving up
+    /// and proceeding without memory context. Only applies when `block_mode`
+    /// is `FirstTurnOnly` or `Always`. Default: 1500ms.
+    pub block_timeout_ms: u64,
 }
 
 impl Default for MemoryConfig {
@@ -987,6 +1016,8 @@ impl Default for MemoryConfig {
             periodic_extraction_interval: 4,
             keyword_trigger_enabled: true,
             keyword_triggers: default_memory_keyword_triggers(),
+            block_mode: MemoryBlockMode::default(),
+            block_timeout_ms: 1500,
         }
     }
 }

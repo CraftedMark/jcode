@@ -1292,6 +1292,104 @@ impl MemoryManager {
         });
     }
 
+    /// Synchronously fetch memory relevant to `messages`, with a hard timeout.
+    ///
+    /// Returns a `PendingMemory` if a relevant prompt was produced within the
+    /// timeout, otherwise `None` (either timeout, no results, or error — all
+    /// non-fatal). On success this also primes `PENDING_MEMORY` so a duplicate
+    /// background check is not wasted.
+    ///
+    /// This is the "block briefly before sending the first prompt" path —
+    /// see `MemoryConfig::block_mode` / `block_timeout_ms`.
+    pub async fn fetch_relevant_blocking(
+        &self,
+        session_id: &str,
+        messages: &[crate::message::Message],
+        timeout: std::time::Duration,
+        event_tx: Option<MemoryEventSink>,
+    ) -> Option<PendingMemory> {
+        let manager = if self.project_dir.is_none() {
+            MemoryManager {
+                project_dir: std::env::current_dir().ok(),
+                ..self.clone()
+            }
+        } else {
+            self.clone()
+        };
+
+        // Reserve the slot so a background spawn for the same session doesn't
+        // race us. If we can't reserve it, a background check is already in
+        // flight; do nothing here and let the caller's existing pending-memory
+        // path pick up the result (or move on without memory).
+        let sid = session_id.to_string();
+        if !begin_memory_check(&sid) {
+            return None;
+        }
+
+        let result = tokio::time::timeout(
+            timeout,
+            manager.get_relevant_parallel(session_id, messages, event_tx.clone()),
+        )
+        .await;
+
+        finish_memory_check(&sid);
+
+        match result {
+            Ok(Ok((Some(prompt), memory_ids, display_prompt))) => {
+                let count = prompt
+                    .lines()
+                    .map(str::trim_start)
+                    .filter(|line| {
+                        line.starts_with("- ")
+                            || line
+                                .split_once(". ")
+                                .map(|(prefix, _)| {
+                                    !prefix.is_empty()
+                                        && prefix.chars().all(|c| c.is_ascii_digit())
+                                })
+                                .unwrap_or(false)
+                    })
+                    .count()
+                    .max(1);
+                // Build the PendingMemory directly (and also publish it so any
+                // sibling code path that polls take_pending_memory observes a
+                // consistent state — though we return it here as well).
+                set_pending_memory_with_ids_and_display(
+                    &sid,
+                    prompt.clone(),
+                    count,
+                    memory_ids.clone(),
+                    display_prompt.clone(),
+                );
+                if memory_sidecar_enabled() {
+                    add_event(MemoryEventKind::SidecarComplete { latency_ms: 0 });
+                }
+                emit_memory_activity(event_tx.as_ref());
+                // Take it back so caller controls injection lifecycle.
+                take_pending_memory(&sid)
+            }
+            Ok(Ok((None, _, _))) => {
+                set_state(MemoryState::Idle);
+                emit_memory_activity(event_tx.as_ref());
+                None
+            }
+            Ok(Err(e)) => {
+                crate::logging::warn(&format!("Blocking memory fetch failed: {}", e));
+                set_state(MemoryState::Idle);
+                None
+            }
+            Err(_) => {
+                // Timed out. Log and proceed without memory.
+                crate::logging::info(&format!(
+                    "Blocking memory fetch for session {} timed out after {:?}",
+                    session_id, timeout
+                ));
+                set_state(MemoryState::Idle);
+                None
+            }
+        }
+    }
+
     /// Get relevant memories using embedding search + sidecar verification.
     ///
     /// 1. Embed the context (fast, local, ~30ms)

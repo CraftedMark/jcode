@@ -712,12 +712,16 @@ async fn build_memory_prompt_nonblocking_defers_pending_memory_during_tool_loop(
         Message::tool_result("call_1", "ok", false),
     ];
 
-    let pending = agent.build_memory_prompt_nonblocking(&tool_loop_messages, None);
+    let pending = agent
+        .build_memory_prompt_nonblocking(&tool_loop_messages, None)
+        .await;
     assert!(pending.is_none(), "memory should not inject mid tool loop");
     assert!(crate::memory::has_pending_memory(&session_id));
 
     let next_turn_messages = vec![Message::user("follow up")];
-    let pending = agent.build_memory_prompt_nonblocking(&next_turn_messages, None);
+    let pending = agent
+        .build_memory_prompt_nonblocking(&next_turn_messages, None)
+        .await;
     assert!(
         pending.is_some(),
         "memory should inject on the next real user turn"

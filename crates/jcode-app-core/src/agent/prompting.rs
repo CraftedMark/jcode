@@ -17,10 +17,10 @@ impl Agent {
         ));
     }
 
-    pub(super) fn build_memory_prompt_nonblocking_shared(
+    pub(super) async fn build_memory_prompt_nonblocking_shared(
         &self,
         messages: std::sync::Arc<[Message]>,
-        _memory_event_tx: Option<crate::memory::MemoryEventSink>,
+        memory_event_tx: Option<crate::memory::MemoryEventSink>,
     ) -> Option<crate::memory::PendingMemory> {
         if !self.memory_enabled {
             return None;
@@ -34,17 +34,53 @@ impl Agent {
             None
         };
 
-        // Use the persistent memory-agent pipeline as the single source of truth.
-        // Running both this and the legacy MemoryManager background retrieval path
-        // can prepare overlapping pending prompts for the same turn, which makes
-        // memory injection feel overly aggressive.
+        // Use the persistent memory-agent pipeline as the single source of truth
+        // for pre-warming the next turn. This is fire-and-forget.
         crate::memory_agent::update_context_sync_with_dir(
             session_id,
-            messages,
+            std::sync::Arc::clone(&messages),
             self.session.working_dir.clone(),
         );
 
-        pending
+        if pending.is_some() {
+            return pending;
+        }
+
+        // First-turn (or always-block) path: briefly wait for a memory fetch so
+        // the very first prompt actually sees memory context.
+        let cfg = &crate::config::config().memory;
+        let should_block = match cfg.block_mode {
+            crate::config::MemoryBlockMode::Never => false,
+            crate::config::MemoryBlockMode::FirstTurnOnly => Self::is_first_user_turn(&messages),
+            crate::config::MemoryBlockMode::Always => true,
+        };
+        if !should_block || !crate::message::ends_with_fresh_user_turn(&messages) {
+            return None;
+        }
+
+        let timeout = std::time::Duration::from_millis(cfg.block_timeout_ms.max(1));
+        let manager = self
+            .session
+            .working_dir
+            .as_deref()
+            .map(|dir| crate::memory::MemoryManager::new().with_project_dir(dir))
+            .unwrap_or_default();
+
+        crate::logging::info(&format!(
+            "Blocking on memory fetch for first turn (timeout={}ms)",
+            timeout.as_millis()
+        ));
+        manager
+            .fetch_relevant_blocking(session_id, &messages, timeout, memory_event_tx)
+            .await
+    }
+
+    /// Heuristic: true if `messages` is the user's first turn in this session
+    /// (i.e. no assistant message has been produced yet).
+    fn is_first_user_turn(messages: &[Message]) -> bool {
+        !messages
+            .iter()
+            .any(|m| matches!(m.role, crate::message::Role::Assistant))
     }
 
     fn append_current_turn_system_reminder(&self, split: &mut crate::prompt::SplitSystemPrompt) {
@@ -112,13 +148,15 @@ impl Agent {
         split
     }
 
-    /// Non-blocking memory prompt - takes pending result and spawns check for next turn
-    #[cfg(test)]
-    pub(super) fn build_memory_prompt_nonblocking(
+    /// Non-blocking memory prompt - takes pending result and spawns check for next turn.
+    /// On the first user turn (or when configured to always block), waits briefly
+    /// for a fresh memory fetch so the very first prompt actually sees memory.
+    pub(super) async fn build_memory_prompt_nonblocking(
         &self,
         messages: &[Message],
-        _memory_event_tx: Option<crate::memory::MemoryEventSink>,
+        memory_event_tx: Option<crate::memory::MemoryEventSink>,
     ) -> Option<crate::memory::PendingMemory> {
-        self.build_memory_prompt_nonblocking_shared(messages.to_vec().into(), _memory_event_tx)
+        self.build_memory_prompt_nonblocking_shared(messages.to_vec().into(), memory_event_tx)
+            .await
     }
 }

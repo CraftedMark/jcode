@@ -72,8 +72,10 @@ impl App {
             }
 
             let tools = self.registry.definitions(None).await;
-            // Non-blocking memory: uses pending result from last turn, spawns check for next turn
-            let memory_pending = self.build_memory_prompt_nonblocking(&provider_messages);
+            // Non-blocking memory: uses pending result from last turn, spawns check for next turn.
+            // On the first turn (or when configured to always block), waits briefly for a fresh
+            // memory fetch so the very first prompt isn't sent without memory context.
+            let memory_pending = self.build_memory_prompt_nonblocking(&provider_messages).await;
             // Use split prompt for better caching - static content cached, dynamic not
             let split_prompt =
                 self.build_system_prompt_split(memory_pending.as_ref().map(|p| p.prompt.as_str()));

@@ -40,9 +40,11 @@ impl Agent {
 
             let tools = self.tool_definitions().await;
             let messages: std::sync::Arc<[Message]> = messages.into();
-            // Non-blocking memory: uses pending result from last turn, spawns check for next turn
-            let memory_pending =
-                self.build_memory_prompt_nonblocking_shared(std::sync::Arc::clone(&messages), None);
+            // Non-blocking memory: uses pending result from last turn, spawns check for next turn.
+            // On first turn (or when configured), blocks briefly for a fresh fetch.
+            let memory_pending = self
+                .build_memory_prompt_nonblocking_shared(std::sync::Arc::clone(&messages), None)
+                .await;
             // Use split prompt for better caching - static content cached, dynamic not
             let split_prompt = self.build_system_prompt_split(None);
             self.log_prompt_prefix_accounting(&split_prompt, &tools);
