@@ -777,6 +777,20 @@ fn test_debug_command_mermaid_flicker_bench_returns_json() {
 }
 
 #[test]
+fn test_push_display_message_suppresses_consecutive_duplicate_assistant_text() {
+    let mut app = create_test_app();
+
+    app.push_display_message(crate::tui::DisplayMessage::assistant("same progress"));
+    app.push_display_message(crate::tui::DisplayMessage::assistant("same progress"));
+
+    assert_eq!(app.display_messages().len(), 1);
+    assert_eq!(app.display_messages()[0].content, "same progress");
+
+    app.push_display_message(crate::tui::DisplayMessage::assistant("different progress"));
+    assert_eq!(app.display_messages().len(), 2);
+}
+
+#[test]
 fn test_remote_transcript_send_uses_remote_submission_path() {
     let mut app = create_test_app();
     app.is_remote = true;

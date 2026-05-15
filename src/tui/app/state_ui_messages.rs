@@ -58,6 +58,9 @@ fn stored_message_visible_text(message: &crate::session::StoredMessage) -> Strin
 impl App {
     pub fn push_display_message(&mut self, mut message: DisplayMessage) {
         compact_display_message_tool_data(&mut message);
+        if self.is_consecutive_duplicate_assistant_message(&message) {
+            return;
+        }
         if self.try_coalesce_repeated_display_message(&message) {
             return;
         }
@@ -263,6 +266,31 @@ impl App {
                 .title
                 .as_deref()
                 .is_some_and(|title| title == "Reload" || title.starts_with("Reload: "))
+    }
+
+    fn is_consecutive_duplicate_assistant_message(&self, message: &DisplayMessage) -> bool {
+        if !Self::is_duplicate_suppressible_assistant_message(message) {
+            return false;
+        }
+
+        let Some(last) = self.display_messages.last() else {
+            return false;
+        };
+
+        Self::is_duplicate_suppressible_assistant_message(last)
+            && last.content == message.content
+            && last.title == message.title
+            && last.tool_calls == message.tool_calls
+            && last.duration_secs == message.duration_secs
+    }
+
+    fn is_duplicate_suppressible_assistant_message(message: &DisplayMessage) -> bool {
+        message.role == "assistant"
+            && message.title.is_none()
+            && message.tool_calls.is_empty()
+            && message.tool_data.is_none()
+            && message.duration_secs.is_none()
+            && !message.content.trim().is_empty()
     }
 
     fn try_coalesce_repeated_display_message(&mut self, message: &DisplayMessage) -> bool {
