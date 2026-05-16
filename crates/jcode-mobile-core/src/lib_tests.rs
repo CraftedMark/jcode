@@ -19,6 +19,104 @@ fn pairing_flow_reaches_connected_chat() {
 }
 
 #[test]
+fn pairing_submit_validates_empty_host_with_swift_parity_message() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::PairingReady));
+    store.dispatch(SimulatorAction::SetHost {
+        value: "   ".to_string(),
+    });
+    let report = store.dispatch(SimulatorAction::TapNode {
+        node_id: "pair.submit".to_string(),
+    });
+
+    assert_eq!(
+        store.state().connection_state,
+        ConnectionState::Disconnected
+    );
+    assert_eq!(store.state().screen, Screen::Onboarding);
+    assert_eq!(
+        store.state().error_message.as_deref(),
+        Some("Host cannot be empty.")
+    );
+    assert!(report.effect_records.is_empty());
+}
+
+#[test]
+fn pairing_submit_validates_empty_code_with_swift_parity_message() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::PairingReady));
+    store.dispatch(SimulatorAction::SetPairCode {
+        value: "   ".to_string(),
+    });
+    let report = store.dispatch(SimulatorAction::TapNode {
+        node_id: "pair.submit".to_string(),
+    });
+
+    assert_eq!(
+        store.state().connection_state,
+        ConnectionState::Disconnected
+    );
+    assert_eq!(
+        store.state().error_message.as_deref(),
+        Some("Enter the 6-digit pairing code from jcode pair.")
+    );
+    assert!(report.effect_records.is_empty());
+}
+
+#[test]
+fn pairing_submit_validates_port_before_effect() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::PairingReady));
+    store.dispatch(SimulatorAction::SetPort {
+        value: "70000".to_string(),
+    });
+    let report = store.dispatch(SimulatorAction::TapNode {
+        node_id: "pair.submit".to_string(),
+    });
+
+    assert_eq!(
+        store.state().error_message.as_deref(),
+        Some("Port must be a number from 0 to 65535.")
+    );
+    assert!(report.effect_records.is_empty());
+}
+
+#[test]
+fn pairing_submit_emits_normalized_pairing_effect() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::PairingReady));
+    store.dispatch(SimulatorAction::SetHost {
+        value: "  devbox.tailnet.ts.net  ".to_string(),
+    });
+    store.dispatch(SimulatorAction::SetPort {
+        value: " 7643 ".to_string(),
+    });
+    store.dispatch(SimulatorAction::SetPairCode {
+        value: " 123456 ".to_string(),
+    });
+    store.dispatch(SimulatorAction::SetDeviceName {
+        value: "  Mark's iPhone  ".to_string(),
+    });
+    let report = store.dispatch(SimulatorAction::TapNode {
+        node_id: "pair.submit".to_string(),
+    });
+
+    assert_eq!(
+        report.effect_records.first().map(|record| &record.effect),
+        Some(&SimulatorEffect::PairAndConnect {
+            host: "devbox.tailnet.ts.net".to_string(),
+            port: "7643".to_string(),
+            pair_code: "123456".to_string(),
+            device_name: "Mark's iPhone".to_string(),
+        })
+    );
+    assert_eq!(
+        store
+            .state()
+            .selected_server
+            .as_ref()
+            .map(|server| server.host.as_str()),
+        Some("devbox.tailnet.ts.net")
+    );
+}
+
+#[test]
 fn sending_message_creates_assistant_reply() {
     let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
     store.dispatch(SimulatorAction::SetDraft {
@@ -43,12 +141,11 @@ fn semantic_tree_reflects_current_screen() {
     let store = SimulatorStore::default();
     let tree = store.semantic_tree();
     assert_eq!(tree.screen, Screen::Onboarding);
-    assert!(
-        tree.root
-            .children
-            .iter()
-            .any(|node| node.id == "pair.submit")
-    );
+    assert!(tree
+        .root
+        .children
+        .iter()
+        .any(|node| node.id == "pair.submit"));
 }
 
 #[test]
@@ -81,11 +178,9 @@ fn semantic_tree_exposes_agent_metadata() {
         return;
     };
     assert!(pair_host.supported_actions.contains(&UiNodeAction::SetText));
-    assert!(
-        pair_host
-            .supported_actions
-            .contains(&UiNodeAction::TypeText)
-    );
+    assert!(pair_host
+        .supported_actions
+        .contains(&UiNodeAction::TypeText));
 }
 
 #[test]
@@ -98,13 +193,11 @@ fn all_scenarios_parse_round_trip() {
 #[test]
 fn scenario_fixtures_cover_error_processing_and_offline_states() {
     let invalid = SimulatorState::for_scenario(ScenarioName::PairingInvalidCode);
-    assert!(
-        invalid
-            .error_message
-            .as_deref()
-            .unwrap_or_default()
-            .contains("Invalid")
-    );
+    assert!(invalid
+        .error_message
+        .as_deref()
+        .unwrap_or_default()
+        .contains("Invalid"));
 
     let streaming = SimulatorState::for_scenario(ScenarioName::ChatStreaming);
     assert!(streaming.is_processing);
@@ -129,14 +222,12 @@ fn fake_backend_rejects_invalid_pairing_code() {
         store.state().connection_state,
         ConnectionState::Disconnected
     );
-    assert!(
-        store
-            .state()
-            .error_message
-            .as_deref()
-            .unwrap_or_default()
-            .contains("Invalid")
-    );
+    assert!(store
+        .state()
+        .error_message
+        .as_deref()
+        .unwrap_or_default()
+        .contains("Invalid"));
 }
 
 #[test]
@@ -153,14 +244,12 @@ fn fake_backend_reports_unreachable_host() {
         store.state().connection_state,
         ConnectionState::Disconnected
     );
-    assert!(
-        store
-            .state()
-            .error_message
-            .as_deref()
-            .unwrap_or_default()
-            .contains("unreachable")
-    );
+    assert!(store
+        .state()
+        .error_message
+        .as_deref()
+        .unwrap_or_default()
+        .contains("unreachable"));
 }
 
 #[test]
@@ -186,13 +275,11 @@ fn replay_trace_records_and_replays_deterministically() -> anyhow::Result<()> {
     assert_eq!(trace.transitions.len(), 7);
     assert_eq!(trace.effects.len(), 2);
     assert_eq!(trace.final_state.screen, Screen::Chat);
-    assert!(
-        trace
-            .final_state
-            .messages
-            .iter()
-            .any(|message| message.text.contains("hello replay"))
-    );
+    assert!(trace
+        .final_state
+        .messages
+        .iter()
+        .any(|message| message.text.contains("hello replay")));
     Ok(())
 }
 

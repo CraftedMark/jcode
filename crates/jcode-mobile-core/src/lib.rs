@@ -81,6 +81,8 @@ pub struct SimulatorState {
     pub is_processing: bool,
 }
 
+pub type MobileAppState = SimulatorState;
+
 impl Default for SimulatorState {
     fn default() -> Self {
         Self::for_scenario(ScenarioName::Onboarding)
@@ -636,29 +638,31 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
             state.error_message = None;
         }
         SimulatorAction::TapNode { node_id } => match node_id.as_str() {
-            "pair.submit" => {
-                if state.pairing.host.trim().is_empty() {
-                    state.error_message = Some("Host cannot be empty.".to_string());
-                } else if state.pairing.pair_code.trim().is_empty() {
-                    state.error_message = Some("Enter a simulated pairing code first.".to_string());
-                } else if state.pairing.device_name.trim().is_empty() {
-                    state.error_message = Some("Device name cannot be empty.".to_string());
-                } else {
+            "pair.submit" => match validate_pairing_form(&state.pairing) {
+                Ok(validated) => {
+                    state.pairing.host = validated.host.clone();
+                    state.pairing.port = validated.port.clone();
+                    state.pairing.pair_code = validated.pair_code.clone();
+                    state.pairing.device_name = validated.device_name.clone();
+
                     state.screen = Screen::Pairing;
                     state.connection_state = ConnectionState::Connecting;
                     state.status_message = Some(format!(
                         "Pairing to {}:{}...",
-                        state.pairing.host, state.pairing.port
+                        validated.host, validated.port
                     ));
                     state.error_message = None;
                     effects.push(SimulatorEffect::PairAndConnect {
-                        host: state.pairing.host.clone(),
-                        port: state.pairing.port.clone(),
-                        pair_code: state.pairing.pair_code.clone(),
-                        device_name: state.pairing.device_name.clone(),
+                        host: validated.host,
+                        port: validated.port,
+                        pair_code: validated.pair_code,
+                        device_name: validated.device_name,
                     });
                 }
-            }
+                Err(message) => {
+                    state.error_message = Some(message);
+                }
+            },
             "chat.send" => {
                 if state.connection_state != ConnectionState::Connected {
                     state.error_message = Some("Not connected.".to_string());
@@ -746,6 +750,43 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
         after: state,
         effects,
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ValidatedPairingForm {
+    host: String,
+    port: String,
+    pair_code: String,
+    device_name: String,
+}
+
+fn validate_pairing_form(form: &PairingForm) -> Result<ValidatedPairingForm, String> {
+    let host = form.host.trim().to_string();
+    if host.is_empty() {
+        return Err("Host cannot be empty.".to_string());
+    }
+
+    let port = form.port.trim().to_string();
+    if port.parse::<u16>().is_err() {
+        return Err("Port must be a number from 0 to 65535.".to_string());
+    }
+
+    let pair_code = form.pair_code.trim().to_string();
+    if pair_code.is_empty() {
+        return Err("Enter the 6-digit pairing code from jcode pair.".to_string());
+    }
+
+    let device_name = form.device_name.trim().to_string();
+    if device_name.is_empty() {
+        return Err("Device name cannot be empty.".to_string());
+    }
+
+    Ok(ValidatedPairingForm {
+        host,
+        port,
+        pair_code,
+        device_name,
+    })
 }
 
 #[derive(Debug, Clone, Default)]
