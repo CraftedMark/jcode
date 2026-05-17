@@ -29,11 +29,45 @@ pub enum MessageRole {
     System,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallState {
+    Streaming,
+    Executing,
+    Done,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub input: String,
+    pub output: Option<String>,
+    pub error: Option<String>,
+    pub state: ToolCallState,
+}
+
+impl ToolCall {
+    pub fn new(id: String, name: String) -> Self {
+        Self {
+            id,
+            name,
+            input: String::new(),
+            output: None,
+            error: None,
+            state: ToolCallState::Streaming,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub id: String,
     pub role: MessageRole,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCall>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,6 +113,8 @@ pub struct SimulatorState {
     pub available_models: Vec<String>,
     pub model_name: Option<String>,
     pub is_processing: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_tool_id: Option<String>,
 }
 
 pub type MobileAppState = SimulatorState;
@@ -107,6 +143,7 @@ impl SimulatorState {
                 available_models: Vec::new(),
                 model_name: None,
                 is_processing: false,
+                active_tool_id: None,
             },
             ScenarioName::PairingReady => Self {
                 pairing: PairingForm {
@@ -143,11 +180,13 @@ impl SimulatorState {
                             id: "msg-user-1".to_string(),
                             role: MessageRole::User,
                             text: "Can you summarize the simulator architecture?".to_string(),
+                            tool_calls: Vec::new(),
                         },
                         ChatMessage {
                             id: "msg-assistant-1".to_string(),
                             role: MessageRole::Assistant,
                             text: "The simulator is headless-first, automation-first, and shares state semantics with the future iOS app.".to_string(),
+                            tool_calls: Vec::new(),
                         },
                     ],
                     draft_message: String::new(),
@@ -156,6 +195,7 @@ impl SimulatorState {
                     available_models: vec!["gpt-5".to_string(), "claude-sonnet-4".to_string()],
                     model_name: Some("gpt-5".to_string()),
                     is_processing: false,
+                    active_tool_id: None,
                 }
             }
             ScenarioName::PairingInvalidCode => Self {
@@ -194,11 +234,13 @@ impl SimulatorState {
                     id: "msg-user-streaming".to_string(),
                     role: MessageRole::User,
                     text: "Run the mobile simulator smoke test.".to_string(),
+                    tool_calls: Vec::new(),
                 });
                 state.messages.push(ChatMessage {
                     id: "msg-assistant-streaming".to_string(),
                     role: MessageRole::Assistant,
                     text: "Running the Linux-native simulator".to_string(),
+                    tool_calls: Vec::new(),
                 });
                 state.status_message = Some("Assistant response is streaming.".to_string());
                 state.is_processing = true;
@@ -211,6 +253,7 @@ impl SimulatorState {
                     role: MessageRole::System,
                     text: "Tool approval required: bash: cargo test -p jcode-mobile-core."
                         .to_string(),
+                    tool_calls: Vec::new(),
                 });
                 state.status_message = Some("Waiting for simulated tool approval.".to_string());
                 state.is_processing = true;
@@ -222,6 +265,7 @@ impl SimulatorState {
                     id: "msg-tool-failed".to_string(),
                     role: MessageRole::System,
                     text: "Simulated tool failed: exit status 1.".to_string(),
+                    tool_calls: Vec::new(),
                 });
                 state.error_message = Some("Last simulated tool failed.".to_string());
                 state
@@ -247,6 +291,7 @@ impl SimulatorState {
                     id: "msg-long-running".to_string(),
                     role: MessageRole::Assistant,
                     text: "Long-running simulated task is still in progress.".to_string(),
+                    tool_calls: Vec::new(),
                 });
                 state.status_message = Some("Long-running simulated task in progress.".to_string());
                 state.is_processing = true;
@@ -368,6 +413,23 @@ pub enum SimulatorAction {
     },
     ReplaceAssistantText {
         text: String,
+    },
+    ToolStart {
+        id: String,
+        name: String,
+    },
+    ToolInput {
+        delta: String,
+    },
+    ToolExec {
+        id: String,
+        name: String,
+    },
+    ToolDone {
+        id: String,
+        name: String,
+        output: String,
+        error: Option<String>,
     },
     FinishTurn,
 }
@@ -678,11 +740,13 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
                         id: format!("msg-user-{next_user_id}"),
                         role: MessageRole::User,
                         text: text.clone(),
+                        tool_calls: Vec::new(),
                     });
                     state.messages.push(ChatMessage {
                         id: format!("msg-assistant-{}", next_user_id + 1),
                         role: MessageRole::Assistant,
                         text: String::new(),
+                        tool_calls: Vec::new(),
                     });
                     state.draft_message.clear();
                     state.status_message = Some("Sending simulated message...".to_string());
@@ -724,6 +788,7 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
             state.status_message = None;
             state.error_message = Some(message);
             state.is_processing = false;
+            state.active_tool_id = None;
         }
         SimulatorAction::Connected { session_id } => {
             state.screen = Screen::Chat;
@@ -739,6 +804,7 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
                     id: "msg-system-connected".to_string(),
                     role: MessageRole::System,
                     text: "Simulator connected. Send a message to begin.".to_string(),
+                    tool_calls: Vec::new(),
                 });
             }
         }
@@ -749,8 +815,47 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
         SimulatorAction::ReplaceAssistantText { text } => {
             replace_latest_assistant(&mut state, text);
         }
+        SimulatorAction::ToolStart { id, name } => {
+            attach_tool_to_latest_assistant(&mut state, ToolCall::new(id.clone(), name));
+            state.active_tool_id = Some(id);
+            state.is_processing = true;
+        }
+        SimulatorAction::ToolInput { delta } => {
+            if let Some(tool_id) = state.active_tool_id.clone() {
+                update_tool(&mut state, &tool_id, |tool| {
+                    tool.input.push_str(&delta);
+                    tool.state = ToolCallState::Streaming;
+                });
+                state.is_processing = true;
+            }
+        }
+        SimulatorAction::ToolExec { id, name: _ } => {
+            update_tool(&mut state, &id, |tool| {
+                tool.state = ToolCallState::Executing;
+            });
+            state.active_tool_id = Some(id);
+            state.is_processing = true;
+        }
+        SimulatorAction::ToolDone {
+            id,
+            name: _,
+            output,
+            error,
+        } => {
+            update_tool(&mut state, &id, |tool| {
+                tool.output = Some(output);
+                tool.error = error;
+                tool.state = if tool.error.is_some() {
+                    ToolCallState::Failed
+                } else {
+                    ToolCallState::Done
+                };
+            });
+            state.active_tool_id = Some(id);
+        }
         SimulatorAction::FinishTurn => {
             state.is_processing = false;
+            state.active_tool_id = None;
             state.status_message = Some("Simulated turn finished.".to_string());
         }
     }
@@ -776,6 +881,7 @@ fn append_to_latest_assistant(state: &mut SimulatorState, text: &str) {
         id: format!("msg-assistant-{}", state.messages.len() + 1),
         role: MessageRole::Assistant,
         text: text.to_string(),
+        tool_calls: Vec::new(),
     });
 }
 
@@ -794,7 +900,41 @@ fn replace_latest_assistant(state: &mut SimulatorState, text: String) {
         id: format!("msg-assistant-{}", state.messages.len() + 1),
         role: MessageRole::Assistant,
         text,
+        tool_calls: Vec::new(),
     });
+}
+
+fn attach_tool_to_latest_assistant(state: &mut SimulatorState, tool: ToolCall) {
+    if let Some(message) = state
+        .messages
+        .iter_mut()
+        .rev()
+        .find(|message| message.role == MessageRole::Assistant)
+    {
+        message.tool_calls.push(tool);
+        return;
+    }
+
+    state.messages.push(ChatMessage {
+        id: format!("msg-assistant-{}", state.messages.len() + 1),
+        role: MessageRole::Assistant,
+        text: String::new(),
+        tool_calls: vec![tool],
+    });
+}
+
+fn update_tool(state: &mut SimulatorState, tool_id: &str, mutate: impl FnOnce(&mut ToolCall)) {
+    for message in state.messages.iter_mut().rev() {
+        if let Some(tool) = message
+            .tool_calls
+            .iter_mut()
+            .rev()
+            .find(|tool| tool.id == tool_id)
+        {
+            mutate(tool);
+            return;
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

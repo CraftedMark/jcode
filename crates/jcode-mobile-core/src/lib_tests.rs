@@ -223,6 +223,118 @@ fn chat_send_empty_draft_does_not_emit_effect() {
 }
 
 #[test]
+fn tool_start_attaches_tool_to_latest_assistant_message() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    store.dispatch(SimulatorAction::ToolStart {
+        id: "tool-1".to_string(),
+        name: "bash".to_string(),
+    });
+
+    let assistant = store
+        .state()
+        .messages
+        .iter()
+        .rev()
+        .find(|message| message.role == MessageRole::Assistant)
+        .expect("assistant message");
+    assert_eq!(assistant.tool_calls.len(), 1);
+    assert_eq!(assistant.tool_calls[0].id, "tool-1");
+    assert_eq!(assistant.tool_calls[0].name, "bash");
+    assert_eq!(assistant.tool_calls[0].state, ToolCallState::Streaming);
+    assert_eq!(store.state().active_tool_id.as_deref(), Some("tool-1"));
+    assert!(store.state().is_processing);
+}
+
+#[test]
+fn tool_input_accumulates_on_active_tool() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    store.dispatch(SimulatorAction::ToolStart {
+        id: "tool-1".to_string(),
+        name: "bash".to_string(),
+    });
+    store.dispatch(SimulatorAction::ToolInput {
+        delta: "cargo ".to_string(),
+    });
+    store.dispatch(SimulatorAction::ToolInput {
+        delta: "test".to_string(),
+    });
+
+    let tool = latest_tool(&store).expect("latest tool");
+    assert_eq!(tool.input, "cargo test");
+    assert_eq!(tool.state, ToolCallState::Streaming);
+}
+
+#[test]
+fn tool_exec_and_done_update_tool_state() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    store.dispatch(SimulatorAction::ToolStart {
+        id: "tool-1".to_string(),
+        name: "bash".to_string(),
+    });
+    store.dispatch(SimulatorAction::ToolExec {
+        id: "tool-1".to_string(),
+        name: "bash".to_string(),
+    });
+
+    let executing = latest_tool(&store).expect("executing tool");
+    assert_eq!(executing.state, ToolCallState::Executing);
+
+    store.dispatch(SimulatorAction::ToolDone {
+        id: "tool-1".to_string(),
+        name: "bash".to_string(),
+        output: "ok".to_string(),
+        error: None,
+    });
+
+    let done = latest_tool(&store).expect("done tool");
+    assert_eq!(done.state, ToolCallState::Done);
+    assert_eq!(done.output.as_deref(), Some("ok"));
+    assert_eq!(done.error, None);
+}
+
+#[test]
+fn tool_done_with_error_marks_tool_failed() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    store.dispatch(SimulatorAction::ToolStart {
+        id: "tool-1".to_string(),
+        name: "bash".to_string(),
+    });
+    store.dispatch(SimulatorAction::ToolDone {
+        id: "tool-1".to_string(),
+        name: "bash".to_string(),
+        output: "stderr".to_string(),
+        error: Some("exit status 1".to_string()),
+    });
+
+    let failed = latest_tool(&store).expect("failed tool");
+    assert_eq!(failed.state, ToolCallState::Failed);
+    assert_eq!(failed.output.as_deref(), Some("stderr"));
+    assert_eq!(failed.error.as_deref(), Some("exit status 1"));
+}
+
+#[test]
+fn finish_turn_clears_active_tool_tracking() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    store.dispatch(SimulatorAction::ToolStart {
+        id: "tool-1".to_string(),
+        name: "bash".to_string(),
+    });
+    store.dispatch(SimulatorAction::FinishTurn);
+
+    assert_eq!(store.state().active_tool_id, None);
+    assert!(!store.state().is_processing);
+}
+
+fn latest_tool(store: &SimulatorStore) -> Option<&ToolCall> {
+    store
+        .state()
+        .messages
+        .iter()
+        .rev()
+        .find_map(|message| message.tool_calls.last())
+}
+
+#[test]
 fn semantic_tree_reflects_current_screen() {
     let store = SimulatorStore::default();
     let tree = store.semantic_tree();
