@@ -137,6 +137,92 @@ fn sending_message_creates_assistant_reply() {
 }
 
 #[test]
+fn chat_send_transition_appends_user_and_assistant_placeholder() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    store.dispatch(SimulatorAction::SetDraft {
+        value: "  hello core  ".to_string(),
+    });
+    let report = store.dispatch(SimulatorAction::TapNode {
+        node_id: "chat.send".to_string(),
+    });
+
+    let send_transition = report
+        .transitions
+        .iter()
+        .find(|transition| {
+            matches!(transition.action, SimulatorAction::TapNode { ref node_id } if node_id == "chat.send")
+        })
+        .expect("chat.send transition");
+    let messages = &send_transition.after.messages;
+    assert_eq!(messages[messages.len() - 2].role, MessageRole::User);
+    assert_eq!(messages[messages.len() - 2].text, "hello core");
+    assert_eq!(messages[messages.len() - 1].role, MessageRole::Assistant);
+    assert_eq!(messages[messages.len() - 1].text, "");
+    assert!(send_transition.after.is_processing);
+}
+
+#[test]
+fn assistant_text_delta_updates_latest_assistant_message() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    store.dispatch(SimulatorAction::AppendAssistantText {
+        text: "hello".to_string(),
+    });
+    store.dispatch(SimulatorAction::AppendAssistantText {
+        text: " world".to_string(),
+    });
+
+    let assistants: Vec<_> = store
+        .state()
+        .messages
+        .iter()
+        .filter(|message| message.role == MessageRole::Assistant)
+        .collect();
+    assert_eq!(assistants.len(), 1);
+    assert_eq!(
+        assistants.last().map(|message| message.text.as_str()),
+        Some("The simulator is headless-first, automation-first, and shares state semantics with the future iOS app.hello world")
+    );
+    assert!(store.state().is_processing);
+}
+
+#[test]
+fn assistant_text_replace_updates_latest_assistant_message() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    store.dispatch(SimulatorAction::ReplaceAssistantText {
+        text: "replacement".to_string(),
+    });
+
+    let assistants: Vec<_> = store
+        .state()
+        .messages
+        .iter()
+        .filter(|message| message.role == MessageRole::Assistant)
+        .collect();
+    assert_eq!(assistants.len(), 1);
+    assert_eq!(
+        assistants.last().map(|message| message.text.as_str()),
+        Some("replacement")
+    );
+}
+
+#[test]
+fn chat_send_empty_draft_does_not_emit_effect() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    store.dispatch(SimulatorAction::SetDraft {
+        value: "   ".to_string(),
+    });
+    let report = store.dispatch(SimulatorAction::TapNode {
+        node_id: "chat.send".to_string(),
+    });
+
+    assert_eq!(
+        store.state().error_message.as_deref(),
+        Some("Draft is empty.")
+    );
+    assert!(report.effect_records.is_empty());
+}
+
+#[test]
 fn semantic_tree_reflects_current_screen() {
     let store = SimulatorStore::default();
     let tree = store.semantic_tree();

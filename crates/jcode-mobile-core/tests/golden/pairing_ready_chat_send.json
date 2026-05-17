@@ -443,6 +443,11 @@
             "id": "msg-user-2",
             "role": "user",
             "text": "hello replay"
+          },
+          {
+            "id": "msg-assistant-3",
+            "role": "assistant",
+            "text": ""
           }
         ],
         "model_name": "gpt-5",
@@ -604,6 +609,11 @@
             "id": "msg-user-2",
             "role": "user",
             "text": "hello replay"
+          },
+          {
+            "id": "msg-assistant-3",
+            "role": "assistant",
+            "text": ""
           }
         ],
         "model_name": "gpt-5",

@@ -366,6 +366,9 @@ pub enum SimulatorAction {
     AppendAssistantText {
         text: String,
     },
+    ReplaceAssistantText {
+        text: String,
+    },
     FinishTurn,
 }
 
@@ -670,10 +673,16 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
                     state.error_message = Some("Draft is empty.".to_string());
                 } else {
                     let text = state.draft_message.trim().to_string();
+                    let next_user_id = state.messages.len() + 1;
                     state.messages.push(ChatMessage {
-                        id: format!("msg-user-{}", state.messages.len() + 1),
+                        id: format!("msg-user-{next_user_id}"),
                         role: MessageRole::User,
                         text: text.clone(),
+                    });
+                    state.messages.push(ChatMessage {
+                        id: format!("msg-assistant-{}", next_user_id + 1),
+                        role: MessageRole::Assistant,
+                        text: String::new(),
                     });
                     state.draft_message.clear();
                     state.status_message = Some("Sending simulated message...".to_string());
@@ -734,11 +743,11 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
             }
         }
         SimulatorAction::AppendAssistantText { text } => {
-            state.messages.push(ChatMessage {
-                id: format!("msg-assistant-{}", state.messages.len() + 1),
-                role: MessageRole::Assistant,
-                text,
-            });
+            append_to_latest_assistant(&mut state, &text);
+            state.is_processing = true;
+        }
+        SimulatorAction::ReplaceAssistantText { text } => {
+            replace_latest_assistant(&mut state, text);
         }
         SimulatorAction::FinishTurn => {
             state.is_processing = false;
@@ -750,6 +759,42 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
         after: state,
         effects,
     }
+}
+
+fn append_to_latest_assistant(state: &mut SimulatorState, text: &str) {
+    if let Some(message) = state
+        .messages
+        .iter_mut()
+        .rev()
+        .find(|message| message.role == MessageRole::Assistant)
+    {
+        message.text.push_str(text);
+        return;
+    }
+
+    state.messages.push(ChatMessage {
+        id: format!("msg-assistant-{}", state.messages.len() + 1),
+        role: MessageRole::Assistant,
+        text: text.to_string(),
+    });
+}
+
+fn replace_latest_assistant(state: &mut SimulatorState, text: String) {
+    if let Some(message) = state
+        .messages
+        .iter_mut()
+        .rev()
+        .find(|message| message.role == MessageRole::Assistant)
+    {
+        message.text = text;
+        return;
+    }
+
+    state.messages.push(ChatMessage {
+        id: format!("msg-assistant-{}", state.messages.len() + 1),
+        role: MessageRole::Assistant,
+        text,
+    });
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
