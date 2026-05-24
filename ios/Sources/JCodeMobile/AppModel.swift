@@ -8,6 +8,8 @@ import UIKit
 
 @MainActor
 final class AppModel: ObservableObject {
+    let notifications = NotificationBridge()
+
     enum ConnectionState: Equatable {
         case disconnected
         case connecting
@@ -136,6 +138,7 @@ final class AppModel: ObservableObject {
     }
 
     func loadSavedServers() async {
+        await notifications.refreshAuthorizationStatus()
         let all = await credentialStore.all()
         let creds = all.sorted {
             if $0.host == $1.host {
@@ -752,6 +755,11 @@ final class AppModel: ObservableObject {
         }
 
         messages.append(ChatEntry(role: .system, text: interrupt.message))
+        notifications.notify(
+            title: "jcode interrupted",
+            body: interrupt.message,
+            identifier: "jcode.interrupted.\(UUID().uuidString)"
+        )
 
         inFlightTools.removeAll()
         lastToolId = nil
@@ -803,10 +811,20 @@ final class AppModel: ObservableObject {
         lastAssistantIndex = nil
         toolMessageIndex.removeAll()
         toolSubIndex.removeAll()
+        notifications.notify(
+            title: "jcode finished",
+            body: activeSessionId.isEmpty ? "The current run finished." : "Session \(activeSessionId) finished.",
+            identifier: "jcode.done.\(UUID().uuidString)"
+        )
     }
 
     fileprivate func onServerError(id _: UInt64, message: String) {
         errorMessage = message
+        notifications.notify(
+            title: "jcode needs attention",
+            body: message,
+            identifier: "jcode.error.\(UUID().uuidString)"
+        )
     }
 
     fileprivate func onModelChanged(model: String, provider _: String?) {

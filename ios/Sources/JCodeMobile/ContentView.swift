@@ -757,6 +757,7 @@ struct SettingsSheet: View {
     @State private var showQRScanner = false
     @State private var showAddServer = false
     @State private var rustCoreStatus = RustCoreDiagnostics.smoke()
+    @State private var notificationStatus = "Not requested"
 
     var body: some View {
         NavigationStack {
@@ -820,6 +821,22 @@ struct SettingsSheet: View {
                 ) {
                     Task { await model.refreshGatewayDiagnostics() }
                 }
+
+                DiagnosticRow(
+                    icon: notificationStatus == "Allowed" ? "bell.badge.fill" : "bell.slash.fill",
+                    title: "Notifications",
+                    value: notificationStatus,
+                    isHealthy: notificationStatus == "Allowed" || notificationStatus == "Provisional"
+                ) {
+                    Task {
+                        await model.notifications.requestAuthorization()
+                        notificationStatus = model.notifications.status
+                    }
+                }
+            }
+            .task {
+                await model.notifications.refreshAuthorizationStatus()
+                notificationStatus = model.notifications.status
             }
         }
     }
