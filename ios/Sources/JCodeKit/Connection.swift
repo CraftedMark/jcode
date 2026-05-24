@@ -27,10 +27,11 @@ public actor JCodeConnection {
     private static let keepaliveIntervalNanos: UInt64 = 20_000_000_000
 
     public init(host: String, port: UInt16 = 7643, authToken: String) {
+        let endpoint = GatewayEndpoint(host: host, port: port)
         var components = URLComponents()
         components.scheme = "ws"
-        components.host = host
-        components.port = Int(port)
+        components.host = endpoint.host
+        components.port = Int(endpoint.port)
         components.path = "/ws"
         self.serverURL = components.url!
         self.authToken = authToken

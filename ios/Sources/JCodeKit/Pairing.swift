@@ -27,8 +27,9 @@ public struct PairingClient: Sendable {
     public let port: UInt16
 
     public init(host: String, port: UInt16 = 7643) {
-        self.host = host
-        self.port = port
+        let endpoint = GatewayEndpoint(host: host, port: port)
+        self.host = endpoint.host
+        self.port = endpoint.port
     }
 
     private var baseURL: URL {
