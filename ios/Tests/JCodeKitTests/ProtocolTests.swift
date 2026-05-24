@@ -76,6 +76,18 @@ do {
     assertEqual(json6["type"] as? String, "rename_session")
     assertEqual(json6["id"] as? UInt64, 13)
     assertNil(json6["title"] as? String)
+
+    let json7 = try encodeRequest(.approvalDecision(
+        id: 77,
+        requestId: "req_permission_1",
+        approved: false,
+        reason: "Not safe from phone"
+    ))
+    assertEqual(json7["type"] as? String, "approval_decision")
+    assertEqual(json7["id"] as? UInt64, 77)
+    assertEqual(json7["request_id"] as? String, "req_permission_1")
+    assertEqual(json7["approved"] as? Bool, false)
+    assertEqual(json7["reason"] as? String, "Not safe from phone")
 }
 
 // MARK: - ServerEvent Decoding
@@ -241,6 +253,7 @@ do {
         .getState(id: 5), .setModel(id: 6, model: "claude-sonnet-4-20250514"),
         .compact(id: 7), .renameSession(id: 12, title: "Release planning"),
         .split(id: 8), .backgroundTool(id: 9),
+        .approvalDecision(id: 14, requestId: "req_permission_1", approved: true),
         .resumeSession(id: 10, sessionId: "fox"),
         .cycleModel(id: 11, direction: -1),
     ]

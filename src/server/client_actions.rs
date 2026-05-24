@@ -848,6 +848,31 @@ pub(super) async fn handle_stdin_response(
     let _ = client_event_tx.send(ServerEvent::Done { id });
 }
 
+pub(super) fn handle_approval_decision(
+    id: u64,
+    request_id: String,
+    approved: bool,
+    reason: Option<String>,
+    client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
+) {
+    match crate::safety::record_permission_via_file(
+        &request_id,
+        approved,
+        "mobile_gateway",
+        reason.as_deref(),
+    ) {
+        Ok(()) => {
+            let _ = client_event_tx.send(ServerEvent::Done { id });
+        }
+        Err(error) => {
+            let _ = client_event_tx.send(ServerEvent::Error {
+                id,
+                message: format!("Failed to submit approval decision: {error}"),
+            });
+        }
+    }
+}
+
 pub(super) struct AgentTaskContext<'a> {
     pub(super) client_event_tx: &'a mpsc::UnboundedSender<ServerEvent>,
     pub(super) swarm_members: &'a Arc<RwLock<HashMap<String, SwarmMember>>>,

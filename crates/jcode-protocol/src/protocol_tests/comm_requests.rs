@@ -67,6 +67,37 @@ fn test_stdin_response_deserialize_from_json() -> Result<()> {
 }
 
 #[test]
+fn test_approval_decision_roundtrip() -> Result<()> {
+    let req = Request::ApprovalDecision {
+        id: 77,
+        request_id: "req_permission_1".to_string(),
+        approved: false,
+        reason: Some("Not safe from phone".to_string()),
+    };
+    let json = serde_json::to_string(&req)?;
+    assert!(json.contains("\"type\":\"approval_decision\""));
+    assert!(json.contains("\"request_id\":\"req_permission_1\""));
+    assert!(json.contains("\"approved\":false"));
+    assert!(json.contains("\"reason\":\"Not safe from phone\""));
+
+    let decoded = parse_request_json(&json)?;
+    assert_eq!(decoded.id(), 77);
+    let Request::ApprovalDecision {
+        request_id,
+        approved,
+        reason,
+        ..
+    } = decoded
+    else {
+        return Err(anyhow!("expected ApprovalDecision"));
+    };
+    assert_eq!(request_id, "req_permission_1");
+    assert!(!approved);
+    assert_eq!(reason.as_deref(), Some("Not safe from phone"));
+    Ok(())
+}
+
+#[test]
 fn test_stdin_request_event_roundtrip() -> Result<()> {
     let event = ServerEvent::StdinRequest {
         request_id: "stdin-xyz-1".to_string(),

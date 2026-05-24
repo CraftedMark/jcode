@@ -85,6 +85,13 @@ pub enum MobileRequest {
         request_id: String,
         input: String,
     },
+    ApprovalDecision {
+        id: u64,
+        request_id: String,
+        approved: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
 }
 
 impl MobileRequest {
@@ -106,7 +113,8 @@ impl MobileRequest {
             | Self::CancelSoftInterrupts { id }
             | Self::BackgroundTool { id }
             | Self::Split { id }
-            | Self::StdinResponse { id, .. } => *id,
+            | Self::StdinResponse { id, .. }
+            | Self::ApprovalDecision { id, .. } => *id,
         }
     }
 
@@ -546,6 +554,25 @@ mod tests {
         assert_eq!(
             value,
             json!({"type":"rename_session","id":12,"title":"Release planning"})
+        );
+    }
+
+    #[test]
+    fn mobile_approval_decision_request_matches_gateway_json_shape() {
+        let request = MobileRequest::ApprovalDecision {
+            id: 77,
+            request_id: "req_permission_1".to_string(),
+            approved: true,
+            reason: None,
+        };
+        let value = serde_json::to_value(request);
+        assert!(value.is_ok(), "request should serialize");
+        let Ok(value) = value else {
+            return;
+        };
+        assert_eq!(
+            value,
+            json!({"type":"approval_decision","id":77,"request_id":"req_permission_1","approved":true})
         );
     }
 

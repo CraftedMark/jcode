@@ -425,6 +425,16 @@ pub enum Request {
         input: String,
     },
 
+    /// Submit an approve/deny decision for a pending permission request.
+    #[serde(rename = "approval_decision")]
+    ApprovalDecision {
+        id: u64,
+        request_id: String,
+        approved: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+
     // === Agent-to-agent communication ===
     /// Register as an external agent
     #[serde(rename = "agent_register")]
@@ -2020,6 +2030,7 @@ impl Request {
             Request::SwitchAnthropicAccount { id, .. } => *id,
             Request::SwitchOpenAiAccount { id, .. } => *id,
             Request::StdinResponse { id, .. } => *id,
+            Request::ApprovalDecision { id, .. } => *id,
             Request::AgentRegister { id, .. } => *id,
             Request::AgentTask { id, .. } => *id,
             Request::AgentCapabilities { id } => *id,

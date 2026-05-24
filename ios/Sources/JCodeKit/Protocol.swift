@@ -20,6 +20,7 @@ public enum Request: Encodable, Sendable {
     case backgroundTool(id: UInt64)
     case split(id: UInt64)
     case stdinResponse(id: UInt64, requestId: String, input: String)
+    case approvalDecision(id: UInt64, requestId: String, approved: Bool, reason: String? = nil)
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: DynamicCodingKey.self)
@@ -112,6 +113,15 @@ public enum Request: Encodable, Sendable {
             try container.encode(id, forKey: .key("id"))
             try container.encode(requestId, forKey: .key("request_id"))
             try container.encode(input, forKey: .key("input"))
+
+        case let .approvalDecision(id, requestId, approved, reason):
+            try container.encode("approval_decision", forKey: .key("type"))
+            try container.encode(id, forKey: .key("id"))
+            try container.encode(requestId, forKey: .key("request_id"))
+            try container.encode(approved, forKey: .key("approved"))
+            if let reason {
+                try container.encode(reason, forKey: .key("reason"))
+            }
         }
     }
 }

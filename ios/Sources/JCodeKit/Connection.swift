@@ -121,6 +121,12 @@ public actor JCodeConnection {
         try await send(.softInterrupt(id: id, content: content, urgent: urgent))
     }
 
+    public func submitApproval(requestId: String, approved: Bool, reason: String? = nil) async throws {
+        let id = nextId
+        nextId += 1
+        try await send(.approvalDecision(id: id, requestId: requestId, approved: approved, reason: reason))
+    }
+
     // MARK: - Private
 
     private func send(_ request: Request) async throws {
