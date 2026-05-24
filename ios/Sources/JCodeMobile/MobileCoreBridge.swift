@@ -6,7 +6,7 @@ import JCodeMobileCore
 
 @MainActor
 final class MobileCoreBridge {
-    private var handle: OpaquePointer?
+    private nonisolated(unsafe) var handle: OpaquePointer?
 
     init() {
         let initial = #"{"scenario":"onboarding"}"#
@@ -40,7 +40,7 @@ final class MobileCoreBridge {
         defer {
             jcode_mobile_string_free(responsePointer)
         }
-        guard let response = String(validatingUTF8: responsePointer),
+        guard let response = String(validatingCString: responsePointer),
               let data = response.data(using: .utf8),
               let envelope = try? JSONDecoder().decode(MobileCoreStateEnvelope.self, from: data),
               envelope.ok else {

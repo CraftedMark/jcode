@@ -21,7 +21,7 @@ enum RustCoreDiagnostics {
             jcode_mobile_string_free(response)
         }
 
-        guard let text = String(validatingUTF8: response) else {
+        guard let text = String(validatingCString: response) else {
             return "Rust dispatch returned invalid UTF-8"
         }
 
