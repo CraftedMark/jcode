@@ -756,6 +756,7 @@ struct SettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showQRScanner = false
     @State private var showAddServer = false
+    @State private var rustCoreStatus = RustCoreDiagnostics.smoke()
 
     var body: some View {
         NavigationStack {
@@ -765,6 +766,7 @@ struct SettingsSheet: View {
                 ScrollView {
                     VStack(spacing: JC.Spacing.xl) {
                         connectionSection
+                        diagnosticsSection
                         repairPairingSection
                         serversSection
                         sessionsSection
@@ -793,6 +795,39 @@ struct SettingsSheet: View {
         }
         .sheet(isPresented: $showAddServer) {
             AddServerSheet(isPresented: $showAddServer)
+        }
+    }
+
+    private var diagnosticsSection: some View {
+        VStack(alignment: .leading, spacing: JC.Spacing.md) {
+            SectionHeader(title: "Diagnostics")
+
+            HStack(spacing: JC.Spacing.md) {
+                Image(systemName: rustCoreStatus == "Rust core linked" ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(rustCoreStatus == "Rust core linked" ? JC.Colors.accent : JC.Colors.destructive)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Rust mobile core")
+                        .font(JC.Fonts.callout)
+                        .foregroundStyle(JC.Colors.textPrimary)
+                    Text(rustCoreStatus)
+                        .font(JC.Fonts.caption)
+                        .foregroundStyle(JC.Colors.textTertiary)
+                }
+
+                Spacer()
+
+                Button {
+                    rustCoreStatus = RustCoreDiagnostics.smoke()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                .buttonStyle(GhostButton())
+                .accessibilityLabel("Refresh Rust core diagnostics")
+            }
+            .glassCard()
         }
     }
 

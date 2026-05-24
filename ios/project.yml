@@ -37,6 +37,9 @@ targets:
     dependencies:
       - package: JCodeKit
         product: JCodeKit
+      - framework: ../target/mobile-ios/JCodeMobileCore.xcframework
+        embed: false
+        codeSign: false
     entitlements:
       path: Sources/JCodeMobile/JCodeMobile.entitlements
       properties: {}
