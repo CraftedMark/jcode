@@ -96,7 +96,7 @@ struct MobileCoreMessage: Decodable {
     let text: String
 }
 
-struct MobileCoreApproval: Decodable {
+struct MobileCoreApproval: Decodable, Equatable, Identifiable {
     let id: String
     let commandSummary: String
     let risk: String

@@ -416,6 +416,11 @@ struct StreamView: View {
                         emptyState
                     }
 
+                    if !model.pendingApprovals.isEmpty {
+                        ApprovalPanel(approvals: model.pendingApprovals)
+                            .padding(.bottom, JC.Spacing.sm)
+                    }
+
                     ForEach(model.messages) { message in
                         StreamEntry(message: message)
                             .id(message.id)
@@ -453,6 +458,105 @@ struct StreamView: View {
                 proxy.scrollTo(id, anchor: .bottom)
             }
         }
+    }
+}
+
+// MARK: - Approvals
+
+struct ApprovalPanel: View {
+    @EnvironmentObject private var model: AppModel
+    let approvals: [MobileCoreApproval]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: JC.Spacing.sm) {
+            HStack(spacing: JC.Spacing.xs) {
+                Image(systemName: "hand.raised.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(JC.Colors.amber)
+                Text("Approval Required")
+                    .font(JC.Fonts.caption)
+                    .foregroundStyle(JC.Colors.textPrimary)
+            }
+
+            ForEach(approvals) { approval in
+                VStack(alignment: .leading, spacing: JC.Spacing.sm) {
+                    HStack(alignment: .top, spacing: JC.Spacing.sm) {
+                        RiskPill(risk: approval.risk)
+                        Text(approval.commandSummary)
+                            .font(JC.Fonts.streamSmall)
+                            .foregroundStyle(JC.Colors.textSecondary)
+                            .textSelection(.enabled)
+                            .lineLimit(3)
+                    }
+
+                    HStack(spacing: JC.Spacing.sm) {
+                        Button {
+                            Task { await model.submitApproval(approval, approved: false) }
+                        } label: {
+                            Label("Deny", systemImage: "xmark")
+                        }
+                        .buttonStyle(CompactDecisionButton(color: JC.Colors.destructive))
+
+                        Button {
+                            Task { await model.submitApproval(approval, approved: true) }
+                        } label: {
+                            Label("Allow", systemImage: "checkmark")
+                        }
+                        .buttonStyle(CompactDecisionButton(color: JC.Colors.green))
+                    }
+                }
+                .padding(JC.Spacing.sm)
+                .background(JC.Colors.surface)
+                .clipShape(RoundedRectangle(cornerRadius: JC.Radius.sm, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: JC.Radius.sm, style: .continuous)
+                        .stroke(JC.Colors.amber.opacity(0.35), lineWidth: 1)
+                )
+            }
+        }
+        .padding(JC.Spacing.sm)
+        .background(JC.Colors.amber.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: JC.Radius.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: JC.Radius.md, style: .continuous)
+                .stroke(JC.Colors.amber.opacity(0.25), lineWidth: 1)
+        )
+    }
+}
+
+struct RiskPill: View {
+    let risk: String
+
+    var body: some View {
+        Text(risk.uppercased())
+            .font(.system(size: 10, weight: .bold, design: .monospaced))
+            .foregroundStyle(color)
+            .padding(.horizontal, JC.Spacing.xs)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.14))
+            .clipShape(Capsule())
+    }
+
+    private var color: Color {
+        switch risk.lowercased() {
+        case "high": JC.Colors.destructive
+        case "medium": JC.Colors.amber
+        default: JC.Colors.green
+        }
+    }
+}
+
+struct CompactDecisionButton: ButtonStyle {
+    let color: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(JC.Fonts.caption)
+            .foregroundStyle(color)
+            .padding(.horizontal, JC.Spacing.md)
+            .padding(.vertical, JC.Spacing.xs)
+            .background(color.opacity(configuration.isPressed ? 0.22 : 0.12))
+            .clipShape(Capsule())
     }
 }
 

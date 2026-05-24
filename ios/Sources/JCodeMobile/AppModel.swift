@@ -96,6 +96,7 @@ final class AppModel: ObservableObject {
     @Published var gatewayHealthVersion: String = ""
     @Published var gatewayHealthCheckedAt: Date?
     @Published var rustCoreReducerStatus: String = "Not checked"
+    @Published var pendingApprovals: [MobileCoreApproval] = []
 
     private let credentialStore = CredentialStore()
     private var client: JCodeClient?
@@ -529,6 +530,29 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func submitApproval(_ approval: MobileCoreApproval, approved: Bool) async {
+        guard let client else {
+            errorMessage = "Not connected."
+            return
+        }
+
+        let decisionNode = approved ? "approve" : "deny"
+        let nodeId = "approval.\(approval.id).\(decisionNode)"
+        dispatchCore(action: #"{"type":"tap_node","node_id":\#(nodeId.jsonEscapedForMobileCore)}"#)
+
+        do {
+            try await client.submitApproval(
+                requestId: approval.id,
+                approved: approved,
+                reason: approved ? nil : "Denied from iPhone"
+            )
+            statusMessage = approved ? "Approval sent." : "Approval denied."
+            errorMessage = nil
+        } catch {
+            errorMessage = "Approval failed: \(error.localizedDescription)"
+        }
+    }
+
     func changeModel(_ model: String) async {
         guard let client else { return }
         dispatchCore(action: #"{"type":"set_model","model":\#(model.jsonEscapedForMobileCore)}"#)
@@ -705,17 +729,32 @@ final class AppModel: ObservableObject {
     private func syncRustCoreDiagnostics() {
         guard mobileCore.isLinked else {
             rustCoreReducerStatus = "Rust reducer not linked"
+            pendingApprovals = []
             return
         }
-        rustCoreReducerStatus = mobileCore.state()?.summary ?? "Rust reducer state unavailable"
+        if let snapshot = mobileCore.state() {
+            applyCoreSnapshot(snapshot)
+        } else {
+            rustCoreReducerStatus = "Rust reducer state unavailable"
+        }
     }
 
     private func dispatchCore(action: String) {
         guard mobileCore.isLinked else {
             rustCoreReducerStatus = "Rust reducer not linked"
+            pendingApprovals = []
             return
         }
-        rustCoreReducerStatus = mobileCore.dispatch(action)?.summary ?? "Rust reducer dispatch failed"
+        if let snapshot = mobileCore.dispatch(action) {
+            applyCoreSnapshot(snapshot)
+        } else {
+            rustCoreReducerStatus = "Rust reducer dispatch failed"
+        }
+    }
+
+    private func applyCoreSnapshot(_ snapshot: MobileCoreSnapshot) {
+        rustCoreReducerStatus = snapshot.summary
+        pendingApprovals = snapshot.state.pendingApprovals
     }
 
     private func dispatchCoreConnectedIntent() {

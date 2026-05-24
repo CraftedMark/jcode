@@ -176,6 +176,10 @@ public actor JCodeClient {
         try await connection.setModel(model)
     }
 
+    public func submitApproval(requestId: String, approved: Bool, reason: String? = nil) async throws {
+        try await connection.submitApproval(requestId: requestId, approved: approved, reason: reason)
+    }
+
     public func refreshHistory() async throws {
         let _ = try await connection.requestHistory()
     }
