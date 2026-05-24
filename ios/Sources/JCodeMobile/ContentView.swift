@@ -802,33 +802,37 @@ struct SettingsSheet: View {
         VStack(alignment: .leading, spacing: JC.Spacing.md) {
             SectionHeader(title: "Diagnostics")
 
-            HStack(spacing: JC.Spacing.md) {
-                Image(systemName: rustCoreStatus == "Rust core linked" ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(rustCoreStatus == "Rust core linked" ? JC.Colors.accent : JC.Colors.destructive)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Rust mobile core")
-                        .font(JC.Fonts.callout)
-                        .foregroundStyle(JC.Colors.textPrimary)
-                    Text(rustCoreStatus)
-                        .font(JC.Fonts.caption)
-                        .foregroundStyle(JC.Colors.textTertiary)
-                }
-
-                Spacer()
-
-                Button {
+            VStack(spacing: JC.Spacing.md) {
+                DiagnosticRow(
+                    icon: rustCoreStatus == "Rust core linked" ? "checkmark.seal.fill" : "exclamationmark.triangle.fill",
+                    title: "Rust mobile core",
+                    value: rustCoreStatus,
+                    isHealthy: rustCoreStatus == "Rust core linked"
+                ) {
                     rustCoreStatus = RustCoreDiagnostics.smoke()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 14, weight: .semibold))
                 }
-                .buttonStyle(GhostButton())
-                .accessibilityLabel("Refresh Rust core diagnostics")
+
+                DiagnosticRow(
+                    icon: model.gatewayHealthStatus == "Gateway reachable" ? "network" : "antenna.radiowaves.left.and.right.slash",
+                    title: "Gateway health",
+                    value: gatewayDiagnosticText,
+                    isHealthy: model.gatewayHealthStatus == "Gateway reachable"
+                ) {
+                    Task { await model.refreshGatewayDiagnostics() }
+                }
             }
-            .glassCard()
         }
+    }
+
+    private var gatewayDiagnosticText: String {
+        var parts = [model.gatewayHealthStatus]
+        if !model.gatewayHealthVersion.isEmpty {
+            parts.append(model.gatewayHealthVersion)
+        }
+        if let checkedAt = model.gatewayHealthCheckedAt {
+            parts.append(checkedAt.formatted(date: .omitted, time: .shortened))
+        }
+        return parts.joined(separator: " - ")
     }
 
     private var repairPairingSection: some View {
@@ -1116,6 +1120,43 @@ struct SectionHeader: View {
             .font(JC.Fonts.caption)
             .foregroundStyle(JC.Colors.textTertiary)
             .tracking(1.2)
+    }
+}
+
+struct DiagnosticRow: View {
+    let icon: String
+    let title: String
+    let value: String
+    let isHealthy: Bool
+    let refresh: () -> Void
+
+    var body: some View {
+        HStack(spacing: JC.Spacing.md) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(isHealthy ? JC.Colors.accent : JC.Colors.destructive)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(JC.Fonts.callout)
+                    .foregroundStyle(JC.Colors.textPrimary)
+                Text(value)
+                    .font(JC.Fonts.caption)
+                    .foregroundStyle(JC.Colors.textTertiary)
+                    .lineLimit(3)
+            }
+
+            Spacer()
+
+            Button(action: refresh) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .buttonStyle(GhostButton())
+            .accessibilityLabel("Refresh \(title)")
+        }
+        .glassCard()
     }
 }
 

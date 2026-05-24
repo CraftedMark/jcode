@@ -89,6 +89,9 @@ final class AppModel: ObservableObject {
     @Published var serverName: String = ""
     @Published var serverVersion: String = ""
     @Published var modelName: String = ""
+    @Published var gatewayHealthStatus: String = "Not checked"
+    @Published var gatewayHealthVersion: String = ""
+    @Published var gatewayHealthCheckedAt: Date?
 
     private let credentialStore = CredentialStore()
     private var client: JCodeClient?
@@ -193,6 +196,49 @@ final class AppModel: ObservableObject {
             errorMessage = nil
         } catch {
             errorMessage = "Unable to reach server. Verify Tailscale and gateway settings."
+        }
+    }
+
+    func refreshGatewayDiagnostics() async {
+        let targetHost: String
+        let targetPort: UInt16
+
+        if let selectedServer {
+            targetHost = selectedServer.host
+            targetPort = selectedServer.port
+        } else {
+            guard let port = parsePort() else {
+                gatewayHealthStatus = "Port must be a number from 0 to 65535."
+                gatewayHealthVersion = ""
+                gatewayHealthCheckedAt = Date()
+                return
+            }
+            let host = hostInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !host.isEmpty else {
+                gatewayHealthStatus = "Host cannot be empty."
+                gatewayHealthVersion = ""
+                gatewayHealthCheckedAt = Date()
+                return
+            }
+            targetHost = host
+            targetPort = port
+        }
+
+        gatewayHealthStatus = "Checking \(targetHost):\(targetPort)..."
+        gatewayHealthVersion = ""
+        gatewayHealthCheckedAt = Date()
+
+        do {
+            let response = try await PairingClient(host: targetHost, port: targetPort).checkHealth()
+            gatewayHealthStatus = response.gateway
+                ? "Gateway reachable"
+                : "Server reachable, gateway flag missing"
+            gatewayHealthVersion = response.version
+            gatewayHealthCheckedAt = Date()
+        } catch {
+            gatewayHealthStatus = "Gateway unreachable. Check host, port, network, and jcode serve."
+            gatewayHealthVersion = ""
+            gatewayHealthCheckedAt = Date()
         }
     }
 
