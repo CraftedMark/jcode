@@ -56,6 +56,7 @@ members = [
     "crates/jcode-terminal-launch",
     "crates/jcode-tui-workspace",
     "crates/jcode-mobile-core",
+    "crates/jcode-mobile-ffi",
     "crates/jcode-mobile-sim",
     "crates/jcode-desktop",
 ]

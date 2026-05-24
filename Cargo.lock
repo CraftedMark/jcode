@@ -3529,6 +3529,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "jcode-mobile-ffi"
+version = "0.1.0"
+dependencies = [
+ "jcode-mobile-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "jcode-mobile-sim"
 version = "0.1.0"
 dependencies = [
