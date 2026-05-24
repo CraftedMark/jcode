@@ -103,6 +103,7 @@ public protocol JCodeClientDelegate: AnyObject {
     func clientDidReceiveHistory(messages: [HistoryMessage])
     func clientDidInterrupt(_ interrupt: InterruptInfo)
     func clientDidInjectSoftInterrupt(_ info: SoftInterruptInjectionInfo)
+    func clientDidUpdateApprovals(_ approvals: [ApprovalRequestPayload])
 }
 
 @MainActor
@@ -114,6 +115,7 @@ public extension JCodeClientDelegate {
     func clientDidReceiveHistory(messages: [HistoryMessage]) {}
     func clientDidInterrupt(_ interrupt: InterruptInfo) {}
     func clientDidInjectSoftInterrupt(_ info: SoftInterruptInjectionInfo) {}
+    func clientDidUpdateApprovals(_ approvals: [ApprovalRequestPayload]) {}
 }
 
 public actor JCodeClient {
@@ -178,6 +180,10 @@ public actor JCodeClient {
 
     public func submitApproval(requestId: String, approved: Bool, reason: String? = nil) async throws {
         try await connection.submitApproval(requestId: requestId, approved: approved, reason: reason)
+    }
+
+    public func refreshApprovals() async throws {
+        let _ = try await connection.requestApprovals()
     }
 
     public func refreshHistory() async throws {
@@ -283,6 +289,9 @@ public actor JCodeClient {
         case .softInterruptInjected(let content, let point, let toolsSkipped):
             let info = SoftInterruptInjectionInfo(content: content, point: point, toolsSkipped: toolsSkipped)
             await callDelegate { $0.clientDidInjectSoftInterrupt(info) }
+
+        case .approvalRequests(_, let requests):
+            await callDelegate { $0.clientDidUpdateApprovals(requests) }
 
         case .ack, .pong, .state, .reloading, .reloadProgress,
              .notification, .swarmStatus, .mcpStatus,

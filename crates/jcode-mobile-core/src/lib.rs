@@ -1369,6 +1369,25 @@ fn apply_server_event(state: &mut SimulatorState, event: protocol::MobileServerE
             });
             state.is_processing = true;
         }
+        protocol::MobileServerEvent::ApprovalRequests { requests, .. } => {
+            state.pending_approvals = requests
+                .into_iter()
+                .map(|request| ApprovalRequest {
+                    id: request.id,
+                    command_summary: request.command_summary,
+                    workspace: request.workspace,
+                    risk: match request.risk.as_str() {
+                        "high" => ApprovalRisk::High,
+                        "low" => ApprovalRisk::Low,
+                        _ => ApprovalRisk::Medium,
+                    },
+                    timeout_seconds: request
+                        .timeout_seconds
+                        .and_then(|value| u32::try_from(value).ok()),
+                    reason: None,
+                })
+                .collect();
+        }
         protocol::MobileServerEvent::TokenUsage { .. }
         | protocol::MobileServerEvent::UpstreamProvider { .. }
         | protocol::MobileServerEvent::SessionRenamed { .. }

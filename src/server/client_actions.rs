@@ -9,7 +9,7 @@ use super::{
     update_member_status,
 };
 use crate::agent::Agent;
-use crate::protocol::{FeatureToggle, NotificationType, ServerEvent};
+use crate::protocol::{ApprovalRequestSnapshot, FeatureToggle, NotificationType, ServerEvent};
 use crate::session::Session;
 use crate::util::truncate_str;
 use jcode_agent_runtime::{SoftInterruptSource, StreamError};
@@ -871,6 +871,50 @@ pub(super) fn handle_approval_decision(
             });
         }
     }
+}
+
+pub(super) fn handle_approval_requests(
+    id: u64,
+    client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
+) {
+    let safety = crate::safety::SafetySystem::new();
+    let requests = safety
+        .pending_requests()
+        .into_iter()
+        .map(|request| {
+            let workspace = request
+                .context
+                .as_ref()
+                .and_then(|context| {
+                    context
+                        .get("workspace")
+                        .or_else(|| context.get("working_dir"))
+                })
+                .and_then(serde_json::Value::as_str)
+                .map(ToString::to_string);
+
+            let timeout_seconds = request
+                .context
+                .as_ref()
+                .and_then(|context| {
+                    context
+                        .get("timeout_seconds")
+                        .or_else(|| context.get("timeout_secs"))
+                })
+                .and_then(serde_json::Value::as_u64);
+
+            ApprovalRequestSnapshot {
+                id: request.id,
+                command_summary: request.description,
+                risk: format!("{:?}", request.urgency).to_lowercase(),
+                workspace,
+                created_at: Some(request.created_at.to_rfc3339()),
+                timeout_seconds,
+            }
+        })
+        .collect();
+
+    let _ = client_event_tx.send(ServerEvent::ApprovalRequests { id, requests });
 }
 
 pub(super) struct AgentTaskContext<'a> {

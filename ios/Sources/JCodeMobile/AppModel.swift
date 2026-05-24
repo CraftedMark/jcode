@@ -390,6 +390,7 @@ final class AppModel: ObservableObject {
             reconnecting = false
             statusMessage = "Connected to \(credential.host):\(credential.port)"
             dispatchCore(action: #"{"type":"connected","session_id":"\#(activeSessionId.isEmpty ? "pending" : activeSessionId)"}"#)
+            try? await newClient.refreshApprovals()
         } catch {
             connectionState = .disconnected
             shouldAutoReconnect = false
@@ -548,6 +549,7 @@ final class AppModel: ObservableObject {
             )
             statusMessage = approved ? "Approval sent." : "Approval denied."
             errorMessage = nil
+            try? await client.refreshApprovals()
         } catch {
             errorMessage = "Approval failed: \(error.localizedDescription)"
         }
@@ -924,6 +926,20 @@ final class AppModel: ObservableObject {
         }.joined(separator: ",")
         dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"history","session_id":\#(activeSessionId.jsonEscapedForMobileCore),"messages":[\#(messageJson)],"available_models":\#(jsonArray(availableModels)),"all_sessions":\#(jsonArray(sessions))}}"#)
     }
+
+    fileprivate func onApprovals(_ approvals: [ApprovalRequestPayload]) {
+        pendingApprovals = approvals.map(MobileCoreApproval.init(payload:))
+        for approval in approvals {
+            let risk = approval.risk.lowercased()
+            let coreRisk: String
+            switch risk {
+            case "high": coreRisk = "high"
+            case "low": coreRisk = "low"
+            default: coreRisk = "medium"
+            }
+            dispatchCore(action: #"{"type":"approval_requested","request":{"id":\#(approval.id.jsonEscapedForMobileCore),"command_summary":\#(approval.commandSummary.jsonEscapedForMobileCore),"risk":"\#(coreRisk)"}}"#)
+        }
+    }
 }
 
 private func jsonArray(_ values: [String]) -> String {
@@ -1017,5 +1033,10 @@ private final class ClientDelegate: JCodeClientDelegate {
     func clientDidInjectSoftInterrupt(_ info: SoftInterruptInjectionInfo) {
         guard guardCurrent() else { return }
         model.onSoftInterruptInjected(info)
+    }
+
+    func clientDidUpdateApprovals(_ approvals: [ApprovalRequestPayload]) {
+        guard guardCurrent() else { return }
+        model.onApprovals(approvals)
     }
 }

@@ -435,6 +435,10 @@ pub enum Request {
         reason: Option<String>,
     },
 
+    /// List currently pending permission requests for foreground clients.
+    #[serde(rename = "approval_requests")]
+    ApprovalRequests { id: u64 },
+
     // === Agent-to-agent communication ===
     /// Register as an external agent
     #[serde(rename = "agent_register")]
@@ -1328,6 +1332,26 @@ pub enum ServerEvent {
         /// Tool call ID this is associated with
         tool_call_id: String,
     },
+
+    /// Foreground snapshot of pending permission requests.
+    #[serde(rename = "approval_requests")]
+    ApprovalRequests {
+        id: u64,
+        requests: Vec<ApprovalRequestSnapshot>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ApprovalRequestSnapshot {
+    pub id: String,
+    pub command_summary: String,
+    pub risk: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<u64>,
 }
 
 /// Summary of a tool call for the comm_summary response
@@ -2031,6 +2055,7 @@ impl Request {
             Request::SwitchOpenAiAccount { id, .. } => *id,
             Request::StdinResponse { id, .. } => *id,
             Request::ApprovalDecision { id, .. } => *id,
+            Request::ApprovalRequests { id } => *id,
             Request::AgentRegister { id, .. } => *id,
             Request::AgentTask { id, .. } => *id,
             Request::AgentCapabilities { id } => *id,

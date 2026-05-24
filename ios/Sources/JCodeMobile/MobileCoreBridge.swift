@@ -1,4 +1,5 @@
 import Foundation
+import JCodeKit
 
 #if canImport(JCodeMobileCore)
 import JCodeMobileCore
@@ -105,6 +106,20 @@ struct MobileCoreApproval: Decodable, Equatable, Identifiable {
         case id
         case commandSummary = "command_summary"
         case risk
+    }
+
+    init(id: String, commandSummary: String, risk: String) {
+        self.id = id
+        self.commandSummary = commandSummary
+        self.risk = risk
+    }
+
+    init(payload: ApprovalRequestPayload) {
+        self.init(
+            id: payload.id,
+            commandSummary: payload.commandSummary,
+            risk: payload.risk
+        )
     }
 }
 

@@ -88,6 +88,10 @@ do {
     assertEqual(json7["request_id"] as? String, "req_permission_1")
     assertEqual(json7["approved"] as? Bool, false)
     assertEqual(json7["reason"] as? String, "Not safe from phone")
+
+    let json8 = try encodeRequest(.approvalRequests(id: 78))
+    assertEqual(json8["type"] as? String, "approval_requests")
+    assertEqual(json8["id"] as? UInt64, 78)
 }
 
 // MARK: - ServerEvent Decoding
@@ -161,6 +165,17 @@ do {
         assertNil(title)
         assertEqual(displayTitle, "Generated title")
     } else { check(false, "Expected sessionRenamed clear") }
+
+    let e15 = try decodeEvent(#"{"type":"approval_requests","id":78,"requests":[{"id":"req_permission_1","command_summary":"bash: cargo test","risk":"high","workspace":"/tmp/project","created_at":"2026-05-24T00:00:00Z","timeout_seconds":300}]}"#)
+    if case .approvalRequests(let id, let requests) = e15 {
+        assertEqual(id, 78)
+        assertEqual(requests.count, 1)
+        assertEqual(requests[0].id, "req_permission_1")
+        assertEqual(requests[0].commandSummary, "bash: cargo test")
+        assertEqual(requests[0].risk, "high")
+        assertEqual(requests[0].workspace, "/tmp/project")
+        assertEqual(requests[0].timeoutSeconds, 300)
+    } else { check(false, "Expected approvalRequests") }
 }
 
 // MARK: - History
@@ -254,6 +269,7 @@ do {
         .compact(id: 7), .renameSession(id: 12, title: "Release planning"),
         .split(id: 8), .backgroundTool(id: 9),
         .approvalDecision(id: 14, requestId: "req_permission_1", approved: true),
+        .approvalRequests(id: 15),
         .resumeSession(id: 10, sessionId: "fox"),
         .cycleModel(id: 11, direction: -1),
     ]

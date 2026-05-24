@@ -92,6 +92,9 @@ pub enum MobileRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
+    ApprovalRequests {
+        id: u64,
+    },
 }
 
 impl MobileRequest {
@@ -114,7 +117,8 @@ impl MobileRequest {
             | Self::BackgroundTool { id }
             | Self::Split { id }
             | Self::StdinResponse { id, .. }
-            | Self::ApprovalDecision { id, .. } => *id,
+            | Self::ApprovalDecision { id, .. }
+            | Self::ApprovalRequests { id } => *id,
         }
     }
 
@@ -377,6 +381,23 @@ pub enum MobileServerEvent {
         is_password: bool,
         tool_call_id: String,
     },
+    ApprovalRequests {
+        id: u64,
+        requests: Vec<MobileApprovalRequest>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MobileApprovalRequest {
+    pub id: String,
+    pub command_summary: String,
+    pub risk: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<u64>,
 }
 
 /// Lossless event envelope for preserving unknown gateway events in simulator/fake-backend work.
@@ -574,6 +595,40 @@ mod tests {
             value,
             json!({"type":"approval_decision","id":77,"request_id":"req_permission_1","approved":true})
         );
+    }
+
+    #[test]
+    fn mobile_approval_requests_request_matches_gateway_json_shape() {
+        let request = MobileRequest::ApprovalRequests { id: 78 };
+        let value = serde_json::to_value(request);
+        assert!(value.is_ok(), "request should serialize");
+        let Ok(value) = value else {
+            return;
+        };
+        assert_eq!(value, json!({"type":"approval_requests","id":78}));
+    }
+
+    #[test]
+    fn mobile_approval_requests_event_decodes() {
+        let event: Result<MobileServerEvent, _> = serde_json::from_value(json!({
+            "type":"approval_requests",
+            "id":78,
+            "requests":[{
+                "id":"req_permission_1",
+                "command_summary":"bash: cargo test",
+                "risk":"high",
+                "workspace":"/tmp/project",
+                "created_at":"2026-05-24T00:00:00Z",
+                "timeout_seconds":300
+            }]
+        }));
+        assert!(event.is_ok(), "approval_requests event should decode");
+        let Ok(MobileServerEvent::ApprovalRequests { id, requests }) = event else {
+            return;
+        };
+        assert_eq!(id, 78);
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].risk, "high");
     }
 
     #[test]

@@ -21,6 +21,7 @@ public enum Request: Encodable, Sendable {
     case split(id: UInt64)
     case stdinResponse(id: UInt64, requestId: String, input: String)
     case approvalDecision(id: UInt64, requestId: String, approved: Bool, reason: String? = nil)
+    case approvalRequests(id: UInt64)
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: DynamicCodingKey.self)
@@ -122,6 +123,10 @@ public enum Request: Encodable, Sendable {
             if let reason {
                 try container.encode(reason, forKey: .key("reason"))
             }
+
+        case let .approvalRequests(id):
+            try container.encode("approval_requests", forKey: .key("type"))
+            try container.encode(id, forKey: .key("id"))
         }
     }
 }
@@ -157,6 +162,7 @@ public enum ServerEvent: Decodable, Sendable {
     case splitResponse(id: UInt64, newSessionId: String, newSessionName: String)
     case compactResult(id: UInt64, message: String, success: Bool)
     case stdinRequest(requestId: String, prompt: String, isPassword: Bool, toolCallId: String)
+    case approvalRequests(id: UInt64, requests: [ApprovalRequestPayload])
     case unknown(type: String, raw: String)
 
     enum CodingKeys: String, CodingKey {
@@ -311,6 +317,11 @@ public enum ServerEvent: Decodable, Sendable {
             let toolCallId = try container.decodeIfPresent(String.self, forKey: .key("tool_call_id")) ?? ""
             self = .stdinRequest(requestId: requestId, prompt: prompt, isPassword: isPassword, toolCallId: toolCallId)
 
+        case "approval_requests":
+            let id = try container.decode(UInt64.self, forKey: .key("id"))
+            let requests = try container.decode([ApprovalRequestPayload].self, forKey: .key("requests"))
+            self = .approvalRequests(id: id, requests: requests)
+
         default:
             let raw = String(describing: try? JSONSerialization.data(withJSONObject: [:]))
             self = .unknown(type: type, raw: raw)
@@ -330,6 +341,24 @@ public struct HistoryMessage: Codable, Sendable {
         case role, content
         case toolCalls = "tool_calls"
         case toolData = "tool_data"
+    }
+}
+
+public struct ApprovalRequestPayload: Decodable, Sendable, Equatable {
+    public let id: String
+    public let commandSummary: String
+    public let risk: String
+    public let workspace: String?
+    public let createdAt: String?
+    public let timeoutSeconds: UInt64?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case commandSummary = "command_summary"
+        case risk
+        case workspace
+        case createdAt = "created_at"
+        case timeoutSeconds = "timeout_seconds"
     }
 }
 

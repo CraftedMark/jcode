@@ -127,6 +127,13 @@ public actor JCodeConnection {
         try await send(.approvalDecision(id: id, requestId: requestId, approved: approved, reason: reason))
     }
 
+    public func requestApprovals() async throws -> UInt64 {
+        let id = nextId
+        nextId += 1
+        try await send(.approvalRequests(id: id))
+        return id
+    }
+
     // MARK: - Private
 
     private func send(_ request: Request) async throws {
