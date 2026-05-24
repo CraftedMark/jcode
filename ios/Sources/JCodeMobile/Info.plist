@@ -62,13 +62,35 @@
         <true/>
         <key>NSAllowsArbitraryLoadsInWebContent</key>
         <true/>
+        <key>NSAllowsArbitraryLoadsForMedia</key>
+        <true/>
         <key>NSAllowsLocalNetworking</key>
         <true/>
         <key>NSExceptionDomains</key>
         <dict>
+            <key>100.66.9.6</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+                <key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+                <key>NSIncludesSubdomains</key>
+                <true/>
+            </dict>
+            <key>10.10.10.77</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+                <key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+                <key>NSIncludesSubdomains</key>
+                <true/>
+            </dict>
             <key>localhost</key>
             <dict>
                 <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+                <key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
                 <true/>
                 <key>NSIncludesSubdomains</key>
                 <true/>
@@ -77,12 +99,16 @@
             <dict>
                 <key>NSExceptionAllowsInsecureHTTPLoads</key>
                 <true/>
+                <key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
                 <key>NSIncludesSubdomains</key>
                 <true/>
             </dict>
             <key>ts.net</key>
             <dict>
                 <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+                <key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
                 <true/>
                 <key>NSIncludesSubdomains</key>
                 <true/>
