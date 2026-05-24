@@ -575,6 +575,55 @@ fn approval_expiry_prevents_late_decision() {
     );
 }
 
+#[test]
+fn approval_semantic_tree_exposes_decision_buttons() {
+    let store = SimulatorStore::new(SimulatorState::for_scenario(
+        ScenarioName::ToolApprovalRequired,
+    ));
+    let tree = store.semantic_tree();
+
+    let approval = tree
+        .root
+        .children
+        .iter()
+        .find(|node| node.id == "approval.pending")
+        .expect("approval node");
+    assert_eq!(approval.label, "Approval Required");
+    assert!(approval.bounds.is_some());
+    assert!(
+        approval
+            .children
+            .iter()
+            .any(|node| node.id == "approval.approval-1.approve")
+    );
+    assert!(
+        approval
+            .children
+            .iter()
+            .any(|node| node.id == "approval.approval-1.deny")
+    );
+}
+
+#[test]
+fn tapping_approval_button_emits_approval_effect() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(
+        ScenarioName::ToolApprovalRequired,
+    ));
+    let report = store.dispatch(SimulatorAction::TapNode {
+        node_id: "approval.approval-1.approve".to_string(),
+    });
+
+    assert!(store.state().pending_approvals.is_empty());
+    assert_eq!(
+        report.effect_records.first().map(|record| &record.effect),
+        Some(&SimulatorEffect::SubmitApproval {
+            request_id: "approval-1".to_string(),
+            approved: true,
+            reason: None,
+        })
+    );
+}
+
 fn latest_tool(store: &SimulatorStore) -> Option<&ToolCall> {
     store
         .state()

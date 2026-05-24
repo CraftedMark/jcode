@@ -848,6 +848,26 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
                 state.is_processing = false;
                 state.status_message = Some("Interrupted simulated turn.".to_string());
             }
+            _ if node_id.starts_with("approval.") => {
+                if let Some((request_id, decision)) = parse_approval_node_id(&node_id) {
+                    match decision {
+                        ApprovalDecision::Approve => {
+                            return reduce(state, SimulatorAction::ApproveApproval { request_id });
+                        }
+                        ApprovalDecision::Deny => {
+                            return reduce(
+                                state,
+                                SimulatorAction::DenyApproval {
+                                    request_id,
+                                    reason: Some("Denied from mobile.".to_string()),
+                                },
+                            );
+                        }
+                    }
+                } else {
+                    state.error_message = Some(format!("Unknown approval node id: {node_id}"));
+                }
+            }
             _ => {
                 state.error_message = Some(format!("Unknown node id: {node_id}"));
             }
@@ -1083,6 +1103,26 @@ fn remove_pending_approval(
         .iter()
         .position(|request| request.id == request_id)?;
     Some(state.pending_approvals.remove(index))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApprovalDecision {
+    Approve,
+    Deny,
+}
+
+fn parse_approval_node_id(node_id: &str) -> Option<(String, ApprovalDecision)> {
+    let rest = node_id.strip_prefix("approval.")?;
+    let (request_id, decision) = rest.rsplit_once('.')?;
+    let decision = match decision {
+        "approve" => ApprovalDecision::Approve,
+        "deny" => ApprovalDecision::Deny,
+        _ => return None,
+    };
+    if request_id.is_empty() {
+        return None;
+    }
+    Some((request_id.to_string(), decision))
 }
 
 fn append_to_latest_assistant(state: &mut SimulatorState, text: &str) {
@@ -1652,6 +1692,62 @@ fn build_ui_tree(state: &SimulatorState) -> UiTree {
             ]);
         }
         Screen::Chat => {
+            if !state.pending_approvals.is_empty() {
+                let approval_children = state
+                    .pending_approvals
+                    .iter()
+                    .flat_map(|approval| {
+                        [
+                            UiNode {
+                                id: format!("approval.{}.approve", approval.id),
+                                role: UiNodeRole::Button,
+                                label: "Approve".to_string(),
+                                value: Some(approval.command_summary.clone()),
+                                visible: true,
+                                enabled: true,
+                                focused: false,
+                                accessibility_label: None,
+                                accessibility_value: None,
+                                supported_actions: Vec::new(),
+                                bounds: None,
+                                children: Vec::new(),
+                            },
+                            UiNode {
+                                id: format!("approval.{}.deny", approval.id),
+                                role: UiNodeRole::Button,
+                                label: "Deny".to_string(),
+                                value: Some(approval.command_summary.clone()),
+                                visible: true,
+                                enabled: true,
+                                focused: false,
+                                accessibility_label: None,
+                                accessibility_value: None,
+                                supported_actions: Vec::new(),
+                                bounds: None,
+                                children: Vec::new(),
+                            },
+                        ]
+                    })
+                    .collect();
+                children.push(UiNode {
+                    id: "approval.pending".to_string(),
+                    role: UiNodeRole::Banner,
+                    label: "Approval Required".to_string(),
+                    value: Some(format!(
+                        "{} pending approval(s)",
+                        state.pending_approvals.len()
+                    )),
+                    visible: true,
+                    enabled: true,
+                    focused: false,
+                    accessibility_label: None,
+                    accessibility_value: None,
+                    supported_actions: Vec::new(),
+                    bounds: None,
+                    children: approval_children,
+                });
+            }
+
             let message_children = state
                 .messages
                 .iter()
@@ -1802,14 +1898,38 @@ fn layout_pairing_screen(children: &mut [UiNode], mut y: i32) {
 }
 
 fn layout_chat_screen(children: &mut [UiNode], y: i32) {
+    let mut content_y = y;
+    if let Some(approval) = children
+        .iter_mut()
+        .find(|node| node.id == "approval.pending")
+    {
+        approval.bounds = Some(UiRect {
+            x: 16,
+            y: content_y,
+            width: DEFAULT_VIEWPORT_WIDTH - 32,
+            height: 76,
+        });
+        let mut button_x = DEFAULT_VIEWPORT_WIDTH - 190;
+        for child in &mut approval.children {
+            child.bounds = Some(UiRect {
+                x: button_x,
+                y: content_y + 16,
+                width: 82,
+                height: 44,
+            });
+            button_x += 90;
+        }
+        content_y += 88;
+    }
+
     if let Some(messages) = children.iter_mut().find(|node| node.id == "chat.messages") {
         messages.bounds = Some(UiRect {
             x: 16,
-            y,
+            y: content_y,
             width: DEFAULT_VIEWPORT_WIDTH - 32,
-            height: 610 - y,
+            height: 610 - content_y,
         });
-        let mut message_y = y + 8;
+        let mut message_y = content_y + 8;
         for message in &mut messages.children {
             message.bounds = Some(UiRect {
                 x: 24,
