@@ -5,6 +5,10 @@ mod visual;
 
 pub use visual::*;
 
+fn is_zero_u32(value: &u32) -> bool {
+    *value == 0
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Screen {
@@ -115,6 +119,12 @@ pub struct SimulatorState {
     pub is_processing: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_tool_id: Option<String>,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub reconnect_attempt: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_model_name: Option<String>,
 }
 
 pub type MobileAppState = SimulatorState;
@@ -144,6 +154,9 @@ impl SimulatorState {
                 model_name: None,
                 is_processing: false,
                 active_tool_id: None,
+                reconnect_attempt: 0,
+                pending_session_id: None,
+                pending_model_name: None,
             },
             ScenarioName::PairingReady => Self {
                 pairing: PairingForm {
@@ -196,6 +209,9 @@ impl SimulatorState {
                     model_name: Some("gpt-5".to_string()),
                     is_processing: false,
                     active_tool_id: None,
+                    reconnect_attempt: 0,
+                    pending_session_id: None,
+                    pending_model_name: None,
                 }
             }
             ScenarioName::PairingInvalidCode => Self {
@@ -405,8 +421,21 @@ pub enum SimulatorAction {
     Connected {
         session_id: String,
     },
+    Disconnected {
+        message: Option<String>,
+        should_reconnect: bool,
+    },
     ConnectionFailed {
         message: String,
+    },
+    SwitchSession {
+        session_id: String,
+    },
+    SetModel {
+        model: String,
+    },
+    ApplyServerEvent {
+        event: protocol::MobileServerEvent,
     },
     AppendAssistantText {
         text: String,
@@ -445,6 +474,18 @@ pub enum SimulatorEffect {
     },
     SendMessage {
         text: String,
+    },
+    Reconnect {
+        host: String,
+        port: String,
+        session_id: Option<String>,
+        attempt: u32,
+    },
+    ResumeSession {
+        session_id: String,
+    },
+    SetModel {
+        model: String,
     },
 }
 
@@ -793,10 +834,16 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
         SimulatorAction::Connected { session_id } => {
             state.screen = Screen::Chat;
             state.connection_state = ConnectionState::Connected;
-            state.active_session_id = Some(session_id.clone());
-            state.sessions = vec![session_id];
-            state.available_models = vec!["gpt-5".to_string(), "claude-sonnet-4".to_string()];
-            state.model_name = Some("gpt-5".to_string());
+            ensure_session(&mut state, session_id.clone());
+            if state.available_models.is_empty() {
+                state.available_models = vec!["gpt-5".to_string(), "claude-sonnet-4".to_string()];
+            }
+            if state.model_name.is_none() {
+                state.model_name = Some("gpt-5".to_string());
+            }
+            state.reconnect_attempt = 0;
+            state.pending_session_id = None;
+            state.pending_model_name = None;
             state.status_message = Some("Connected to simulated jcode server.".to_string());
             state.error_message = None;
             if state.messages.is_empty() {
@@ -807,6 +854,75 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
                     tool_calls: Vec::new(),
                 });
             }
+        }
+        SimulatorAction::Disconnected {
+            message,
+            should_reconnect,
+        } => {
+            state.connection_state = ConnectionState::Disconnected;
+            state.is_processing = false;
+            state.active_tool_id = None;
+            state.pending_model_name = None;
+            if let Some(message) = message {
+                state.error_message = Some(message);
+            }
+
+            if should_reconnect {
+                if let Some(server) = state.selected_server.clone() {
+                    let attempt = state.reconnect_attempt;
+                    state.reconnect_attempt = state.reconnect_attempt.saturating_add(1);
+                    state.connection_state = ConnectionState::Connecting;
+                    state.status_message = Some(format!(
+                        "Reconnecting to {}:{} (attempt {})...",
+                        server.host,
+                        server.port,
+                        attempt + 1
+                    ));
+                    effects.push(SimulatorEffect::Reconnect {
+                        host: server.host,
+                        port: server.port,
+                        session_id: state.active_session_id.clone(),
+                        attempt,
+                    });
+                } else {
+                    state.status_message = None;
+                    state.error_message = Some("Select a paired server first.".to_string());
+                }
+            } else {
+                state.status_message = Some("Disconnected.".to_string());
+            }
+        }
+        SimulatorAction::SwitchSession { session_id } => {
+            let session_id = session_id.trim().to_string();
+            if session_id.is_empty() {
+                state.error_message = Some("Session id cannot be empty.".to_string());
+            } else if state.connection_state != ConnectionState::Connected {
+                state.error_message = Some("Not connected.".to_string());
+            } else {
+                ensure_session(&mut state, session_id.clone());
+                state.pending_session_id = Some(session_id.clone());
+                state.messages.clear();
+                clear_active_turn_tracking(&mut state);
+                state.status_message = Some(format!("Switching to {session_id}..."));
+                state.error_message = None;
+                effects.push(SimulatorEffect::ResumeSession { session_id });
+            }
+        }
+        SimulatorAction::SetModel { model } => {
+            let model = model.trim().to_string();
+            if model.is_empty() {
+                state.error_message = Some("Model cannot be empty.".to_string());
+            } else if state.connection_state != ConnectionState::Connected {
+                state.error_message = Some("Not connected.".to_string());
+            } else {
+                state.pending_model_name = Some(model.clone());
+                state.status_message = Some(format!("Switching model to {model}..."));
+                state.error_message = None;
+                effects.push(SimulatorEffect::SetModel { model });
+            }
+        }
+        SimulatorAction::ApplyServerEvent { event } => {
+            apply_server_event(&mut state, event);
         }
         SimulatorAction::AppendAssistantText { text } => {
             append_to_latest_assistant(&mut state, &text);
@@ -855,7 +971,7 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
         }
         SimulatorAction::FinishTurn => {
             state.is_processing = false;
-            state.active_tool_id = None;
+            clear_active_turn_tracking(&mut state);
             state.status_message = Some("Simulated turn finished.".to_string());
         }
     }
@@ -937,6 +1053,271 @@ fn update_tool(state: &mut SimulatorState, tool_id: &str, mutate: impl FnOnce(&m
     }
 }
 
+fn clear_active_turn_tracking(state: &mut SimulatorState) {
+    state.active_tool_id = None;
+}
+
+fn ensure_session(state: &mut SimulatorState, session_id: String) {
+    state.active_session_id = Some(session_id.clone());
+    if !state.sessions.iter().any(|session| session == &session_id) {
+        state.sessions.push(session_id);
+    }
+}
+
+fn apply_server_event(state: &mut SimulatorState, event: protocol::MobileServerEvent) {
+    match event {
+        protocol::MobileServerEvent::Ack { .. } | protocol::MobileServerEvent::Pong { .. } => {}
+        protocol::MobileServerEvent::TextDelta { text } => {
+            append_to_latest_assistant(state, &text);
+            state.is_processing = true;
+        }
+        protocol::MobileServerEvent::TextReplace { text } => {
+            replace_latest_assistant(state, text);
+        }
+        protocol::MobileServerEvent::ToolStart { id, name } => {
+            attach_tool_to_latest_assistant(state, ToolCall::new(id.clone(), name));
+            state.active_tool_id = Some(id);
+            state.is_processing = true;
+        }
+        protocol::MobileServerEvent::ToolInput { delta } => {
+            if let Some(tool_id) = state.active_tool_id.clone() {
+                update_tool(state, &tool_id, |tool| {
+                    tool.input.push_str(&delta);
+                    tool.state = ToolCallState::Streaming;
+                });
+            }
+        }
+        protocol::MobileServerEvent::ToolExec { id, .. } => {
+            update_tool(state, &id, |tool| {
+                tool.state = ToolCallState::Executing;
+            });
+            state.active_tool_id = Some(id);
+            state.is_processing = true;
+        }
+        protocol::MobileServerEvent::ToolDone {
+            id, output, error, ..
+        } => {
+            update_tool(state, &id, |tool| {
+                tool.output = Some(output);
+                tool.error = error;
+                tool.state = if tool.error.is_some() {
+                    ToolCallState::Failed
+                } else {
+                    ToolCallState::Done
+                };
+            });
+            state.active_tool_id = Some(id);
+        }
+        protocol::MobileServerEvent::Done { .. } => {
+            state.is_processing = false;
+            clear_active_turn_tracking(state);
+            state.status_message = Some("Turn finished.".to_string());
+        }
+        protocol::MobileServerEvent::Error { message, .. } => {
+            state.error_message = Some(message);
+            state.is_processing = false;
+            clear_active_turn_tracking(state);
+        }
+        protocol::MobileServerEvent::State {
+            session_id,
+            is_processing,
+            ..
+        } => {
+            state.screen = Screen::Chat;
+            state.connection_state = ConnectionState::Connected;
+            ensure_session(state, session_id);
+            state.is_processing = is_processing;
+            state.reconnect_attempt = 0;
+            state.pending_session_id = None;
+        }
+        protocol::MobileServerEvent::SessionId { session_id } => {
+            state.screen = Screen::Chat;
+            state.connection_state = ConnectionState::Connected;
+            ensure_session(state, session_id);
+            state.reconnect_attempt = 0;
+            state.pending_session_id = None;
+        }
+        protocol::MobileServerEvent::History(payload) => {
+            apply_history_payload(state, payload);
+        }
+        protocol::MobileServerEvent::ModelChanged {
+            model,
+            provider_name: _,
+            error,
+            ..
+        } => {
+            state.pending_model_name = None;
+            if let Some(error) = error {
+                state.error_message = Some(error);
+            } else {
+                if !state
+                    .available_models
+                    .iter()
+                    .any(|existing| existing == &model)
+                {
+                    state.available_models.push(model.clone());
+                }
+                state.model_name = Some(model.clone());
+                state.status_message = Some(format!("Model: {model}"));
+                state.error_message = None;
+            }
+        }
+        protocol::MobileServerEvent::Reloading { .. } => {
+            state.connection_state = ConnectionState::Connecting;
+            state.status_message = Some("Server reloading. Reconnecting...".to_string());
+            state.is_processing = false;
+            clear_active_turn_tracking(state);
+        }
+        protocol::MobileServerEvent::ReloadProgress {
+            message, success, ..
+        } => {
+            if success == Some(false) {
+                state.error_message = Some(message);
+            } else {
+                state.status_message = Some(message);
+            }
+        }
+        protocol::MobileServerEvent::Interrupted => {
+            state.is_processing = false;
+            clear_active_turn_tracking(state);
+            remove_empty_latest_assistant(state);
+            state.messages.push(ChatMessage {
+                id: format!("msg-system-{}", state.messages.len() + 1),
+                role: MessageRole::System,
+                text: "Interrupted by server.".to_string(),
+                tool_calls: Vec::new(),
+            });
+        }
+        protocol::MobileServerEvent::SoftInterruptInjected { tools_skipped, .. } => {
+            state.status_message = if let Some(skipped) = tools_skipped.filter(|count| *count > 0) {
+                Some(format!(
+                    "Updated current run. Skipped {skipped} remaining tool(s)."
+                ))
+            } else {
+                Some("Updated current run.".to_string())
+            };
+        }
+        protocol::MobileServerEvent::SplitResponse {
+            new_session_id,
+            new_session_name,
+            ..
+        } => {
+            ensure_session(state, new_session_id);
+            state.status_message = Some(format!("Created split session: {new_session_name}"));
+        }
+        protocol::MobileServerEvent::CompactResult {
+            message, success, ..
+        } => {
+            if success {
+                state.status_message = Some(message);
+            } else {
+                state.error_message = Some(message);
+            }
+        }
+        protocol::MobileServerEvent::Notification(notification) => {
+            state.status_message = Some(format!("{}: {}", notification.title, notification.body));
+        }
+        protocol::MobileServerEvent::StdinRequest { prompt, .. } => {
+            state.messages.push(ChatMessage {
+                id: format!("msg-system-{}", state.messages.len() + 1),
+                role: MessageRole::System,
+                text: prompt,
+                tool_calls: Vec::new(),
+            });
+            state.is_processing = true;
+        }
+        protocol::MobileServerEvent::TokenUsage { .. }
+        | protocol::MobileServerEvent::UpstreamProvider { .. }
+        | protocol::MobileServerEvent::SessionRenamed { .. }
+        | protocol::MobileServerEvent::SwarmStatus { .. }
+        | protocol::MobileServerEvent::McpStatus { .. }
+        | protocol::MobileServerEvent::MemoryInjected { .. } => {}
+    }
+}
+
+fn apply_history_payload(state: &mut SimulatorState, payload: protocol::HistoryPayload) {
+    state.screen = Screen::Chat;
+    state.connection_state = ConnectionState::Connected;
+    state.active_session_id = Some(payload.session_id.clone());
+    state.sessions = if payload.all_sessions.is_empty() {
+        vec![payload.session_id.clone()]
+    } else {
+        payload.all_sessions
+    };
+    if !state
+        .sessions
+        .iter()
+        .any(|session| session == &payload.session_id)
+    {
+        state.sessions.insert(0, payload.session_id.clone());
+    }
+    state.available_models = payload.available_models;
+    state.model_name = payload.provider_model;
+    state.reconnect_attempt = 0;
+    state.pending_session_id = None;
+    state.pending_model_name = None;
+
+    if let Some(selected) = state.selected_server.as_mut() {
+        if let Some(server_name) = payload.server_name.clone() {
+            selected.server_name = server_name;
+        }
+        if let Some(server_version) = payload.server_version.clone() {
+            selected.server_version = server_version;
+        }
+    }
+
+    state.messages = payload
+        .messages
+        .into_iter()
+        .enumerate()
+        .map(|(idx, item)| history_message_to_chat(idx, item))
+        .collect();
+    clear_active_turn_tracking(state);
+}
+
+fn history_message_to_chat(idx: usize, item: protocol::HistoryMessage) -> ChatMessage {
+    let tool_calls = item
+        .tool_data
+        .and_then(|tool| {
+            let id = tool.id?;
+            let name = tool.name?;
+            Some(ToolCall {
+                id,
+                name,
+                input: tool.input.unwrap_or_default(),
+                output: tool.output,
+                error: None,
+                state: ToolCallState::Done,
+            })
+        })
+        .into_iter()
+        .collect();
+
+    ChatMessage {
+        id: format!("msg-history-{}", idx + 1),
+        role: match item.role.as_str() {
+            "assistant" => MessageRole::Assistant,
+            "system" => MessageRole::System,
+            _ => MessageRole::User,
+        },
+        text: item.content,
+        tool_calls,
+    }
+}
+
+fn remove_empty_latest_assistant(state: &mut SimulatorState) {
+    if let Some(index) = state
+        .messages
+        .iter()
+        .rposition(|message| message.role == MessageRole::Assistant)
+    {
+        let message = &state.messages[index];
+        if message.text.trim().is_empty() && message.tool_calls.is_empty() {
+            state.messages.remove(index);
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ValidatedPairingForm {
     host: String,
@@ -984,6 +1365,39 @@ impl FakeJcodeBackend {
                 host, pair_code, ..
             } => self.pair_and_connect(&host, &pair_code),
             SimulatorEffect::SendMessage { text } => self.send_message(&text),
+            SimulatorEffect::Reconnect { session_id, .. } => vec![SimulatorAction::Connected {
+                session_id: session_id.unwrap_or_else(|| "session_sim_1".to_string()),
+            }],
+            SimulatorEffect::ResumeSession { session_id } => {
+                vec![SimulatorAction::ApplyServerEvent {
+                    event: protocol::MobileServerEvent::History(protocol::HistoryPayload {
+                        session_id,
+                        messages: Vec::new(),
+                        server_name: Some("jcode".to_string()),
+                        server_icon: None,
+                        server_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+                        provider_name: Some("openai".to_string()),
+                        provider_model: Some("gpt-5".to_string()),
+                        connection_type: Some("simulator".to_string()),
+                        available_models: vec!["gpt-5".to_string(), "claude-sonnet-4".to_string()],
+                        all_sessions: vec![
+                            "session_sim_1".to_string(),
+                            "session_sim_2".to_string(),
+                        ],
+                        is_canary: None,
+                        was_interrupted: None,
+                        total_tokens: None,
+                    }),
+                }]
+            }
+            SimulatorEffect::SetModel { model } => vec![SimulatorAction::ApplyServerEvent {
+                event: protocol::MobileServerEvent::ModelChanged {
+                    id: 0,
+                    model,
+                    provider_name: Some("simulator".to_string()),
+                    error: None,
+                },
+            }],
         }
     }
 

@@ -245,7 +245,7 @@ fn normalize_gateway_host(input: &str) -> anyhow::Result<String> {
 }
 
 /// Events received by the mobile app from the jcode gateway.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MobileServerEvent {
     Ack {

@@ -180,7 +180,9 @@ fn assistant_text_delta_updates_latest_assistant_message() {
     assert_eq!(assistants.len(), 1);
     assert_eq!(
         assistants.last().map(|message| message.text.as_str()),
-        Some("The simulator is headless-first, automation-first, and shares state semantics with the future iOS app.hello world")
+        Some(
+            "The simulator is headless-first, automation-first, and shares state semantics with the future iOS app.hello world"
+        )
     );
     assert!(store.state().is_processing);
 }
@@ -325,6 +327,171 @@ fn finish_turn_clears_active_tool_tracking() {
     assert!(!store.state().is_processing);
 }
 
+#[test]
+fn history_event_updates_session_model_and_messages() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    store.dispatch(SimulatorAction::ApplyServerEvent {
+        event: protocol::MobileServerEvent::History(protocol::HistoryPayload {
+            session_id: "session_sim_2".to_string(),
+            messages: vec![
+                protocol::HistoryMessage {
+                    role: "user".to_string(),
+                    content: "run tests".to_string(),
+                    tool_data: None,
+                },
+                protocol::HistoryMessage {
+                    role: "assistant".to_string(),
+                    content: "done".to_string(),
+                    tool_data: Some(protocol::HistoryToolData {
+                        id: Some("tool-9".to_string()),
+                        name: Some("bash".to_string()),
+                        input: Some("cargo test".to_string()),
+                        output: Some("ok".to_string()),
+                    }),
+                },
+            ],
+            server_name: Some("jcode".to_string()),
+            server_icon: None,
+            server_version: Some("v-test".to_string()),
+            provider_name: Some("openai".to_string()),
+            provider_model: Some("gpt-5.1".to_string()),
+            connection_type: Some("simulator".to_string()),
+            available_models: vec!["gpt-5.1".to_string(), "claude-sonnet-4".to_string()],
+            all_sessions: vec!["session_sim_1".to_string(), "session_sim_2".to_string()],
+            is_canary: None,
+            was_interrupted: None,
+            total_tokens: None,
+        }),
+    });
+
+    assert_eq!(
+        store.state().active_session_id.as_deref(),
+        Some("session_sim_2")
+    );
+    assert_eq!(store.state().model_name.as_deref(), Some("gpt-5.1"));
+    assert_eq!(store.state().messages.len(), 2);
+    let assistant = store.state().messages.last().expect("assistant history");
+    assert_eq!(assistant.role, MessageRole::Assistant);
+    assert_eq!(assistant.tool_calls[0].state, ToolCallState::Done);
+    assert_eq!(assistant.tool_calls[0].input, "cargo test");
+}
+
+#[test]
+fn switch_session_emits_resume_effect_and_waits_for_history() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    let report = store.dispatch(SimulatorAction::SwitchSession {
+        session_id: "session_sim_2".to_string(),
+    });
+
+    let switch_transition = report
+        .transitions
+        .iter()
+        .find(|transition| matches!(transition.action, SimulatorAction::SwitchSession { .. }))
+        .expect("switch transition");
+    assert_eq!(
+        switch_transition.after.pending_session_id.as_deref(),
+        Some("session_sim_2")
+    );
+    assert!(switch_transition.after.messages.is_empty());
+    assert_eq!(
+        report.effect_records.first().map(|record| &record.effect),
+        Some(&SimulatorEffect::ResumeSession {
+            session_id: "session_sim_2".to_string(),
+        })
+    );
+    assert_eq!(
+        store.state().active_session_id.as_deref(),
+        Some("session_sim_2")
+    );
+    assert_eq!(store.state().pending_session_id, None);
+}
+
+#[test]
+fn model_change_waits_for_server_confirmation() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    let report = store.dispatch(SimulatorAction::SetModel {
+        model: "claude-sonnet-4".to_string(),
+    });
+
+    let request_transition = report
+        .transitions
+        .iter()
+        .find(|transition| matches!(transition.action, SimulatorAction::SetModel { .. }))
+        .expect("model request transition");
+    assert_eq!(
+        request_transition.after.pending_model_name.as_deref(),
+        Some("claude-sonnet-4")
+    );
+    assert_eq!(
+        request_transition.after.model_name.as_deref(),
+        Some("gpt-5")
+    );
+    assert_eq!(store.state().model_name.as_deref(), Some("claude-sonnet-4"));
+    assert_eq!(store.state().pending_model_name, None);
+}
+
+#[test]
+fn reconnect_effect_preserves_active_session() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    let report = store.dispatch(SimulatorAction::Disconnected {
+        message: Some("socket closed".to_string()),
+        should_reconnect: true,
+    });
+
+    let reconnect_transition = report
+        .transitions
+        .iter()
+        .find(|transition| {
+            matches!(
+                transition.action,
+                SimulatorAction::Disconnected {
+                    should_reconnect: true,
+                    ..
+                }
+            )
+        })
+        .expect("reconnect transition");
+    assert_eq!(
+        reconnect_transition.after.connection_state,
+        ConnectionState::Connecting
+    );
+    assert_eq!(
+        report.effect_records.first().map(|record| &record.effect),
+        Some(&SimulatorEffect::Reconnect {
+            host: "devbox.tailnet.ts.net".to_string(),
+            port: "7643".to_string(),
+            session_id: Some("session_sim_1".to_string()),
+            attempt: 0,
+        })
+    );
+    assert_eq!(store.state().connection_state, ConnectionState::Connected);
+    assert_eq!(store.state().reconnect_attempt, 0);
+}
+
+#[test]
+fn interrupted_event_removes_empty_assistant_placeholder() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    store.dispatch(SimulatorAction::ReplaceAssistantText {
+        text: String::new(),
+    });
+    store.dispatch(SimulatorAction::ApplyServerEvent {
+        event: protocol::MobileServerEvent::Interrupted,
+    });
+
+    assert!(!store.state().is_processing);
+    assert!(
+        !store
+            .state()
+            .messages
+            .iter()
+            .any(|message| message.role == MessageRole::Assistant && message.text.is_empty())
+    );
+    assert_eq!(
+        store.state().messages.last().map(|message| message.role),
+        Some(MessageRole::System)
+    );
+}
+
 fn latest_tool(store: &SimulatorStore) -> Option<&ToolCall> {
     store
         .state()
@@ -339,11 +506,12 @@ fn semantic_tree_reflects_current_screen() {
     let store = SimulatorStore::default();
     let tree = store.semantic_tree();
     assert_eq!(tree.screen, Screen::Onboarding);
-    assert!(tree
-        .root
-        .children
-        .iter()
-        .any(|node| node.id == "pair.submit"));
+    assert!(
+        tree.root
+            .children
+            .iter()
+            .any(|node| node.id == "pair.submit")
+    );
 }
 
 #[test]
@@ -376,9 +544,11 @@ fn semantic_tree_exposes_agent_metadata() {
         return;
     };
     assert!(pair_host.supported_actions.contains(&UiNodeAction::SetText));
-    assert!(pair_host
-        .supported_actions
-        .contains(&UiNodeAction::TypeText));
+    assert!(
+        pair_host
+            .supported_actions
+            .contains(&UiNodeAction::TypeText)
+    );
 }
 
 #[test]
@@ -391,11 +561,13 @@ fn all_scenarios_parse_round_trip() {
 #[test]
 fn scenario_fixtures_cover_error_processing_and_offline_states() {
     let invalid = SimulatorState::for_scenario(ScenarioName::PairingInvalidCode);
-    assert!(invalid
-        .error_message
-        .as_deref()
-        .unwrap_or_default()
-        .contains("Invalid"));
+    assert!(
+        invalid
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Invalid")
+    );
 
     let streaming = SimulatorState::for_scenario(ScenarioName::ChatStreaming);
     assert!(streaming.is_processing);
@@ -420,12 +592,14 @@ fn fake_backend_rejects_invalid_pairing_code() {
         store.state().connection_state,
         ConnectionState::Disconnected
     );
-    assert!(store
-        .state()
-        .error_message
-        .as_deref()
-        .unwrap_or_default()
-        .contains("Invalid"));
+    assert!(
+        store
+            .state()
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Invalid")
+    );
 }
 
 #[test]
@@ -442,12 +616,14 @@ fn fake_backend_reports_unreachable_host() {
         store.state().connection_state,
         ConnectionState::Disconnected
     );
-    assert!(store
-        .state()
-        .error_message
-        .as_deref()
-        .unwrap_or_default()
-        .contains("unreachable"));
+    assert!(
+        store
+            .state()
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("unreachable")
+    );
 }
 
 #[test]
@@ -473,11 +649,13 @@ fn replay_trace_records_and_replays_deterministically() -> anyhow::Result<()> {
     assert_eq!(trace.transitions.len(), 7);
     assert_eq!(trace.effects.len(), 2);
     assert_eq!(trace.final_state.screen, Screen::Chat);
-    assert!(trace
-        .final_state
-        .messages
-        .iter()
-        .any(|message| message.text.contains("hello replay")));
+    assert!(
+        trace
+            .final_state
+            .messages
+            .iter()
+            .any(|message| message.text.contains("hello replay"))
+    );
     Ok(())
 }
 
