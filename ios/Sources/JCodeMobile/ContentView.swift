@@ -814,6 +814,15 @@ struct SettingsSheet: View {
                 }
 
                 DiagnosticRow(
+                    icon: model.rustCoreReducerStatus.contains("failed") || model.rustCoreReducerStatus.contains("not linked") ? "point.3.connected.trianglepath.dotted" : "point.3.connected.trianglepath.dotted",
+                    title: "Rust reducer",
+                    value: model.rustCoreReducerStatus,
+                    isHealthy: !model.rustCoreReducerStatus.contains("failed") && !model.rustCoreReducerStatus.contains("not linked")
+                ) {
+                    model.rustCoreReducerStatus = RustCoreDiagnostics.smoke()
+                }
+
+                DiagnosticRow(
                     icon: model.gatewayHealthStatus == "Gateway reachable" ? "network" : "antenna.radiowaves.left.and.right.slash",
                     title: "Gateway health",
                     value: gatewayDiagnosticText,

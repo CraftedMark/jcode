@@ -9,6 +9,7 @@ import UIKit
 @MainActor
 final class AppModel: ObservableObject {
     let notifications = NotificationBridge()
+    private let mobileCore = MobileCoreBridge()
 
     enum ConnectionState: Equatable {
         case disconnected
@@ -94,6 +95,7 @@ final class AppModel: ObservableObject {
     @Published var gatewayHealthStatus: String = "Not checked"
     @Published var gatewayHealthVersion: String = ""
     @Published var gatewayHealthCheckedAt: Date?
+    @Published var rustCoreReducerStatus: String = "Not checked"
 
     private let credentialStore = CredentialStore()
     private var client: JCodeClient?
@@ -139,6 +141,7 @@ final class AppModel: ObservableObject {
 
     func loadSavedServers() async {
         await notifications.refreshAuthorizationStatus()
+        syncRustCoreDiagnostics()
         let all = await credentialStore.all()
         let creds = all.sorted {
             if $0.host == $1.host {
@@ -354,6 +357,7 @@ final class AppModel: ObservableObject {
         connectionState = .connecting
         shouldAutoReconnect = true
         reconnecting = false
+        dispatchCoreConnectedIntent()
 
         let sessionToResume = activeSessionId.isEmpty ? rememberedSessionId(for: credential) : activeSessionId
 
@@ -384,12 +388,14 @@ final class AppModel: ObservableObject {
             connectionState = .connected
             reconnecting = false
             statusMessage = "Connected to \(credential.host):\(credential.port)"
+            dispatchCore(action: #"{"type":"connected","session_id":"\#(activeSessionId.isEmpty ? "pending" : activeSessionId)"}"#)
         } catch {
             connectionState = .disconnected
             shouldAutoReconnect = false
             reconnecting = false
             clientDelegate = nil
             errorMessage = "Connect failed: \(error.localizedDescription)"
+            dispatchCore(action: #"{"type":"connection_failed","message":\#(error.localizedDescription.jsonEscapedForMobileCore)}"#)
         }
     }
 
@@ -408,6 +414,7 @@ final class AppModel: ObservableObject {
         self.clientDelegate = nil
         connectionState = .disconnected
         statusMessage = "Disconnected"
+        dispatchCore(action: #"{"type":"disconnected","message":null,"should_reconnect":false}"#)
     }
 
     @discardableResult
@@ -432,6 +439,7 @@ final class AppModel: ObservableObject {
         guard !trimmed.isEmpty || !images.isEmpty else {
             return false
         }
+        dispatchCore(action: #"{"type":"set_draft","value":\#(trimmed.jsonEscapedForMobileCore)}"#)
 
         guard let client else {
             errorMessage = "Not connected."
@@ -463,8 +471,10 @@ final class AppModel: ObservableObject {
                 lastAssistantMessageId = assistantPlaceholder.id
 
                 if images.isEmpty {
+                    dispatchCore(action: #"{"type":"tap_node","node_id":"chat.send"}"#)
                     try await client.send(trimmed)
                 } else {
+                    dispatchCore(action: #"{"type":"tap_node","node_id":"chat.send"}"#)
                     try await client.send(trimmed, images: images)
                 }
             }
@@ -483,6 +493,7 @@ final class AppModel: ObservableObject {
             errorMessage = isInterleaving
                 ? "Could not update the running agent: \(error.localizedDescription)"
                 : "Send failed: \(error.localizedDescription)"
+            dispatchCore(action: #"{"type":"connection_failed","message":\#(errorMessage?.jsonEscapedForMobileCore ?? #""""#)}"#)
             return false
         }
     }
@@ -520,6 +531,7 @@ final class AppModel: ObservableObject {
 
     func changeModel(_ model: String) async {
         guard let client else { return }
+        dispatchCore(action: #"{"type":"set_model","model":\#(model.jsonEscapedForMobileCore)}"#)
         do {
             try await client.changeModel(model)
         } catch {
@@ -538,6 +550,7 @@ final class AppModel: ObservableObject {
         }
 
         do {
+            dispatchCore(action: #"{"type":"switch_session","session_id":\#(sessionId.jsonEscapedForMobileCore)}"#)
             try await client.switchSession(sessionId)
             activeSessionId = sessionId
             rememberSessionId(sessionId)
@@ -689,11 +702,34 @@ final class AppModel: ObservableObject {
         errorMessage = nil
     }
 
+    private func syncRustCoreDiagnostics() {
+        guard mobileCore.isLinked else {
+            rustCoreReducerStatus = "Rust reducer not linked"
+            return
+        }
+        rustCoreReducerStatus = mobileCore.state()?.summary ?? "Rust reducer state unavailable"
+    }
+
+    private func dispatchCore(action: String) {
+        guard mobileCore.isLinked else {
+            rustCoreReducerStatus = "Rust reducer not linked"
+            return
+        }
+        rustCoreReducerStatus = mobileCore.dispatch(action)?.summary ?? "Rust reducer dispatch failed"
+    }
+
+    private func dispatchCoreConnectedIntent() {
+        guard let credential = selectedServer else { return }
+        dispatchCore(action: #"{"type":"set_host","value":\#(credential.host.jsonEscapedForMobileCore)}"#)
+        dispatchCore(action: #"{"type":"set_port","value":\#(String(credential.port).jsonEscapedForMobileCore)}"#)
+    }
+
     fileprivate func onConnected(_ info: ServerInfo) {
         connectionState = .connected
         reconnecting = false
         reconnectAttempt = 0
         applyConnectedServerInfo(info)
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"history","session_id":\#(info.sessionId.jsonEscapedForMobileCore),"messages":[],"server_name":\#((info.serverName ?? "jcode").jsonEscapedForMobileCore),"server_version":\#((info.serverVersion ?? "").jsonEscapedForMobileCore),"provider_model":\#((info.providerModel ?? "").jsonEscapedForMobileCore),"available_models":\#(jsonArray(info.availableModels)),"all_sessions":\#(jsonArray(info.allSessions))}}"#)
     }
 
     fileprivate func onDisconnected(error: String?) {
@@ -710,6 +746,7 @@ final class AppModel: ObservableObject {
         if let error, !error.isEmpty {
             errorMessage = error
         }
+        dispatchCore(action: #"{"type":"disconnected","message":\#((error ?? "").isEmpty ? "null" : error!.jsonEscapedForMobileCore),"should_reconnect":\#(shouldAutoReconnect ? "true" : "false")}"#)
 
         guard shouldAutoReconnect else {
             reconnecting = false
@@ -738,10 +775,12 @@ final class AppModel: ObservableObject {
     fileprivate func onTextDelta(_ text: String) {
         isProcessing = true
         appendAssistantChunk(text)
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"text_delta","text":\#(text.jsonEscapedForMobileCore)}}}"#)
     }
 
     fileprivate func onTextReplace(_ text: String) {
         replaceAssistantText(text)
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"text_replace","text":\#(text.jsonEscapedForMobileCore)}}}"#)
     }
 
     fileprivate func onInterrupted(_ interrupt: InterruptInfo) {
@@ -777,6 +816,7 @@ final class AppModel: ObservableObject {
     fileprivate func onToolStart(_ tool: ToolCallInfo) {
         isProcessing = true
         attachTool(tool)
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"tool_start","id":\#(tool.id.jsonEscapedForMobileCore),"name":\#(tool.name.jsonEscapedForMobileCore)}}}"#)
     }
 
     fileprivate func onToolInput(_ delta: String) {
@@ -787,12 +827,14 @@ final class AppModel: ObservableObject {
             tool.input += delta
             tool.state = .streaming
         }
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"tool_input","delta":\#(delta.jsonEscapedForMobileCore)}}}"#)
     }
 
     fileprivate func onToolExec(id: String, name _: String) {
         updateLatestTool(id) { tool in
             tool.state = .executing
         }
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"tool_exec","id":\#(id.jsonEscapedForMobileCore),"name":"tool"}}"#)
     }
 
     fileprivate func onToolDone(id: String, name _: String, output: String, error: String?) {
@@ -801,6 +843,7 @@ final class AppModel: ObservableObject {
             tool.error = error
             tool.state = error == nil ? .done : .failed
         }
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"tool_done","id":\#(id.jsonEscapedForMobileCore),"name":"tool","output":\#(output.jsonEscapedForMobileCore),"error":\#(error?.jsonEscapedForMobileCore ?? "null")}}}"#)
     }
 
     fileprivate func onTurnDone(id _: UInt64) {
@@ -816,6 +859,7 @@ final class AppModel: ObservableObject {
             body: activeSessionId.isEmpty ? "The current run finished." : "Session \(activeSessionId) finished.",
             identifier: "jcode.done.\(UUID().uuidString)"
         )
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"done","id":0}}"#)
     }
 
     fileprivate func onServerError(id _: UInt64, message: String) {
@@ -825,16 +869,26 @@ final class AppModel: ObservableObject {
             body: message,
             identifier: "jcode.error.\(UUID().uuidString)"
         )
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"error","id":0,"message":\#(message.jsonEscapedForMobileCore)}}}"#)
     }
 
     fileprivate func onModelChanged(model: String, provider _: String?) {
         modelName = model
         statusMessage = "Model: \(model)"
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"model_changed","id":0,"model":\#(model.jsonEscapedForMobileCore)}}}"#)
     }
 
     fileprivate func onHistory(_ history: [HistoryMessage]) {
         applyHistory(history)
+        let messageJson = history.map { item in
+            #"{"role":\#(item.role.jsonEscapedForMobileCore),"content":\#(item.content.jsonEscapedForMobileCore)}"#
+        }.joined(separator: ",")
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"history","session_id":\#(activeSessionId.jsonEscapedForMobileCore),"messages":[\#(messageJson)],"available_models":\#(jsonArray(availableModels)),"all_sessions":\#(jsonArray(sessions))}}"#)
     }
+}
+
+private func jsonArray(_ values: [String]) -> String {
+    "[" + values.map(\.jsonEscapedForMobileCore).joined(separator: ",") + "]"
 }
 
 @MainActor
