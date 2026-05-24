@@ -74,6 +74,24 @@ pub struct ChatMessage {
     pub tool_calls: Vec<ToolCall>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalRisk {
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovalRequest {
+    pub id: String,
+    pub command_summary: String,
+    pub workspace: Option<String>,
+    pub risk: ApprovalRisk,
+    pub timeout_seconds: Option<u32>,
+    pub reason: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerSummary {
     pub host: String,
@@ -117,6 +135,8 @@ pub struct SimulatorState {
     pub available_models: Vec<String>,
     pub model_name: Option<String>,
     pub is_processing: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_approvals: Vec<ApprovalRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_tool_id: Option<String>,
     #[serde(default, skip_serializing_if = "is_zero_u32")]
@@ -153,6 +173,7 @@ impl SimulatorState {
                 available_models: Vec::new(),
                 model_name: None,
                 is_processing: false,
+                pending_approvals: Vec::new(),
                 active_tool_id: None,
                 reconnect_attempt: 0,
                 pending_session_id: None,
@@ -208,6 +229,7 @@ impl SimulatorState {
                     available_models: vec!["gpt-5".to_string(), "claude-sonnet-4".to_string()],
                     model_name: Some("gpt-5".to_string()),
                     is_processing: false,
+                    pending_approvals: Vec::new(),
                     active_tool_id: None,
                     reconnect_attempt: 0,
                     pending_session_id: None,
@@ -264,6 +286,14 @@ impl SimulatorState {
             }
             ScenarioName::ToolApprovalRequired => {
                 let mut state = Self::for_scenario(ScenarioName::ConnectedChat);
+                state.pending_approvals.push(ApprovalRequest {
+                    id: "approval-1".to_string(),
+                    command_summary: "bash: cargo test -p jcode-mobile-core".to_string(),
+                    workspace: Some("/workspace/jcode".to_string()),
+                    risk: ApprovalRisk::Medium,
+                    timeout_seconds: Some(300),
+                    reason: Some("Run the mobile core regression suite.".to_string()),
+                });
                 state.messages.push(ChatMessage {
                     id: "msg-tool-approval".to_string(),
                     role: MessageRole::System,
@@ -437,6 +467,19 @@ pub enum SimulatorAction {
     ApplyServerEvent {
         event: protocol::MobileServerEvent,
     },
+    ApprovalRequested {
+        request: ApprovalRequest,
+    },
+    ApproveApproval {
+        request_id: String,
+    },
+    DenyApproval {
+        request_id: String,
+        reason: Option<String>,
+    },
+    ApprovalExpired {
+        request_id: String,
+    },
     AppendAssistantText {
         text: String,
     },
@@ -486,6 +529,11 @@ pub enum SimulatorEffect {
     },
     SetModel {
         model: String,
+    },
+    SubmitApproval {
+        request_id: String,
+        approved: bool,
+        reason: Option<String>,
     },
 }
 
@@ -924,6 +972,50 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
         SimulatorAction::ApplyServerEvent { event } => {
             apply_server_event(&mut state, event);
         }
+        SimulatorAction::ApprovalRequested { request } => {
+            state
+                .pending_approvals
+                .retain(|existing| existing.id != request.id);
+            let summary = request.command_summary.clone();
+            state.pending_approvals.push(request);
+            state.status_message = Some("Approval required.".to_string());
+            state.messages.push(ChatMessage {
+                id: format!("msg-approval-{}", state.messages.len() + 1),
+                role: MessageRole::System,
+                text: format!("Approval required: {summary}"),
+                tool_calls: Vec::new(),
+            });
+            state.is_processing = true;
+        }
+        SimulatorAction::ApproveApproval { request_id } => {
+            if remove_pending_approval(&mut state, &request_id).is_some() {
+                state.status_message = Some("Approval sent.".to_string());
+                effects.push(SimulatorEffect::SubmitApproval {
+                    request_id,
+                    approved: true,
+                    reason: None,
+                });
+            } else {
+                state.error_message = Some("Approval request is no longer pending.".to_string());
+            }
+        }
+        SimulatorAction::DenyApproval { request_id, reason } => {
+            if remove_pending_approval(&mut state, &request_id).is_some() {
+                state.status_message = Some("Denial sent.".to_string());
+                effects.push(SimulatorEffect::SubmitApproval {
+                    request_id,
+                    approved: false,
+                    reason,
+                });
+            } else {
+                state.error_message = Some("Approval request is no longer pending.".to_string());
+            }
+        }
+        SimulatorAction::ApprovalExpired { request_id } => {
+            if remove_pending_approval(&mut state, &request_id).is_some() {
+                state.status_message = Some("Approval expired.".to_string());
+            }
+        }
         SimulatorAction::AppendAssistantText { text } => {
             append_to_latest_assistant(&mut state, &text);
             state.is_processing = true;
@@ -980,6 +1072,17 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
         after: state,
         effects,
     }
+}
+
+fn remove_pending_approval(
+    state: &mut SimulatorState,
+    request_id: &str,
+) -> Option<ApprovalRequest> {
+    let index = state
+        .pending_approvals
+        .iter()
+        .position(|request| request.id == request_id)?;
+    Some(state.pending_approvals.remove(index))
 }
 
 fn append_to_latest_assistant(state: &mut SimulatorState, text: &str) {
@@ -1398,6 +1501,7 @@ impl FakeJcodeBackend {
                     error: None,
                 },
             }],
+            SimulatorEffect::SubmitApproval { .. } => Vec::new(),
         }
     }
 

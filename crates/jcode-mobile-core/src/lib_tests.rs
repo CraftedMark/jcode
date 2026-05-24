@@ -492,6 +492,89 @@ fn interrupted_event_removes_empty_assistant_placeholder() {
     );
 }
 
+#[test]
+fn approval_request_is_rust_owned_state() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    store.dispatch(SimulatorAction::ApprovalRequested {
+        request: ApprovalRequest {
+            id: "approval-42".to_string(),
+            command_summary: "bash: cargo test -p jcode-mobile-core".to_string(),
+            workspace: Some("/workspace/jcode".to_string()),
+            risk: ApprovalRisk::Medium,
+            timeout_seconds: Some(300),
+            reason: Some("Regression run".to_string()),
+        },
+    });
+
+    assert_eq!(store.state().pending_approvals.len(), 1);
+    assert_eq!(store.state().pending_approvals[0].id, "approval-42");
+    assert!(store.state().is_processing);
+    assert!(
+        store
+            .state()
+            .messages
+            .iter()
+            .any(|message| message.text.contains("Approval required"))
+    );
+}
+
+#[test]
+fn approval_decisions_emit_scoped_effects() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    store.dispatch(SimulatorAction::ApprovalRequested {
+        request: ApprovalRequest {
+            id: "approval-42".to_string(),
+            command_summary: "bash: cargo test".to_string(),
+            workspace: None,
+            risk: ApprovalRisk::Low,
+            timeout_seconds: None,
+            reason: None,
+        },
+    });
+    let report = store.dispatch(SimulatorAction::ApproveApproval {
+        request_id: "approval-42".to_string(),
+    });
+
+    assert!(store.state().pending_approvals.is_empty());
+    assert_eq!(
+        report.effect_records.first().map(|record| &record.effect),
+        Some(&SimulatorEffect::SubmitApproval {
+            request_id: "approval-42".to_string(),
+            approved: true,
+            reason: None,
+        })
+    );
+}
+
+#[test]
+fn approval_expiry_prevents_late_decision() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    store.dispatch(SimulatorAction::ApprovalRequested {
+        request: ApprovalRequest {
+            id: "approval-42".to_string(),
+            command_summary: "bash: rm -rf target".to_string(),
+            workspace: None,
+            risk: ApprovalRisk::High,
+            timeout_seconds: Some(1),
+            reason: None,
+        },
+    });
+    store.dispatch(SimulatorAction::ApprovalExpired {
+        request_id: "approval-42".to_string(),
+    });
+    let report = store.dispatch(SimulatorAction::DenyApproval {
+        request_id: "approval-42".to_string(),
+        reason: Some("Too late".to_string()),
+    });
+
+    assert!(store.state().pending_approvals.is_empty());
+    assert!(report.effect_records.is_empty());
+    assert_eq!(
+        store.state().error_message.as_deref(),
+        Some("Approval request is no longer pending.")
+    );
+}
+
 fn latest_tool(store: &SimulatorStore) -> Option<&ToolCall> {
     store
         .state()
