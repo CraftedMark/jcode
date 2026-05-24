@@ -212,7 +212,17 @@ pub fn openai_compatible_schema(schema: &Value) -> Value {
             let mut out = serde_json::Map::new();
             for (key, value) in map {
                 let normalized_key = if key == "oneOf" { "anyOf" } else { key };
-                out.insert(normalized_key.to_string(), openai_compatible_schema(value));
+                let normalized_value = if normalized_key == "additionalProperties" {
+                    match value {
+                        Value::String(schema_type) => {
+                            serde_json::json!({ "type": schema_type })
+                        }
+                        _ => openai_compatible_schema(value),
+                    }
+                } else {
+                    openai_compatible_schema(value)
+                };
+                out.insert(normalized_key.to_string(), normalized_value);
             }
             match flatten_all_of_schema(out) {
                 Value::Object(mut map) => {
@@ -588,5 +598,25 @@ mod tests {
         );
         assert_eq!(normalized["properties"]["display"]["type"], json!("object"));
         assert_eq!(normalized["properties"]["mode"]["type"], json!("string"));
+    }
+
+    #[test]
+    fn openai_compatible_schema_rewrites_string_additional_properties() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "filters": {
+                    "type": "object",
+                    "additionalProperties": "object"
+                }
+            }
+        });
+
+        let normalized = openai_compatible_schema(&schema);
+
+        assert_eq!(
+            normalized["properties"]["filters"]["additionalProperties"],
+            json!({ "type": "object" })
+        );
     }
 }
