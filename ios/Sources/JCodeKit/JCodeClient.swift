@@ -106,7 +106,7 @@ public protocol JCodeClientDelegate: AnyObject {
     func clientDidUpdateApprovals(_ approvals: [ApprovalRequestPayload])
     func clientDidStartReload(newSocket: String?)
     func clientDidUpdateReloadProgress(step: String, message: String, success: Bool?, output: String?)
-    func clientDidReceiveNotification(_ notification: Notification)
+    func clientDidReceiveNotification(_ notification: ServerNotification)
 }
 
 @MainActor
@@ -121,7 +121,7 @@ public extension JCodeClientDelegate {
     func clientDidUpdateApprovals(_ approvals: [ApprovalRequestPayload]) {}
     func clientDidStartReload(newSocket: String?) {}
     func clientDidUpdateReloadProgress(step: String, message: String, success: Bool?, output: String?) {}
-    func clientDidReceiveNotification(_ notification: Notification) {}
+    func clientDidReceiveNotification(_ notification: ServerNotification) {}
 }
 
 public actor JCodeClient {

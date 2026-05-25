@@ -95,6 +95,8 @@ final class AppModel: ObservableObject {
     @Published var gatewayHealthStatus: String = "Not checked"
     @Published var gatewayHealthVersion: String = ""
     @Published var gatewayHealthCheckedAt: Date?
+    @Published var connectionTransport: String = "Unknown"
+    @Published var lastDisconnectReason: String = "None"
     @Published var rustCoreReducerStatus: String = "Not checked"
     @Published var pendingApprovals: [MobileCoreApproval] = []
 
@@ -377,6 +379,7 @@ final class AppModel: ObservableObject {
         serverName = credential.serverName
         serverVersion = credential.serverVersion
         modelName = ""
+        connectionTransport = "WebSocket"
 
         let newClient = JCodeClient(host: credential.host, port: credential.port, authToken: credential.authToken)
         let delegate = ClientDelegate(model: self, generation: generation)
@@ -594,6 +597,7 @@ final class AppModel: ObservableObject {
         serverName = info.serverName ?? "jcode"
         serverVersion = info.serverVersion ?? ""
         modelName = info.providerModel ?? ""
+        connectionTransport = info.connectionType ?? "WebSocket"
         availableModels = info.availableModels
     }
 
@@ -786,6 +790,11 @@ final class AppModel: ObservableObject {
 
         if let error, !error.isEmpty {
             errorMessage = error
+            lastDisconnectReason = error
+        } else {
+            lastDisconnectReason = statusMessage == "Server reloading. Reconnecting..."
+                ? "Server reload started"
+                : "Closed normally"
         }
         dispatchCore(action: #"{"type":"disconnected","message":\#((error ?? "").isEmpty ? "null" : error!.jsonEscapedForMobileCore),"should_reconnect":\#(shouldAutoReconnect ? "true" : "false")}"#)
 
@@ -857,6 +866,7 @@ final class AppModel: ObservableObject {
     fileprivate func onReloading(newSocket _: String?) {
         isProcessing = false
         statusMessage = "Server reloading. Reconnecting..."
+        lastDisconnectReason = "Server reload started"
         errorMessage = nil
         dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"reloading"}}"#)
     }
@@ -882,7 +892,7 @@ final class AppModel: ObservableObject {
         dispatchCore(action: #"{"type":"apply_server_event","event":{\#(fields.joined(separator: ","))}}"#)
     }
 
-    fileprivate func onServerNotification(_ notification: JCodeKit.Notification) {
+    fileprivate func onServerNotification(_ notification: ServerNotification) {
         statusMessage = notification.message
         notifications.notify(
             title: "jcode notification",
@@ -1096,7 +1106,7 @@ private final class ClientDelegate: JCodeClientDelegate {
         model.onReloadProgress(step: step, message: message, success: success, output: output)
     }
 
-    func clientDidReceiveNotification(_ notification: JCodeKit.Notification) {
+    func clientDidReceiveNotification(_ notification: ServerNotification) {
         guard guardCurrent() else { return }
         model.onServerNotification(notification)
     }

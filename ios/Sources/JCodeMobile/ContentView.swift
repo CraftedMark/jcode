@@ -936,6 +936,34 @@ struct SettingsSheet: View {
                 }
 
                 DiagnosticRow(
+                    icon: "server.rack",
+                    title: "Selected server",
+                    value: selectedServerDiagnosticText,
+                    isHealthy: model.selectedServer != nil
+                )
+
+                DiagnosticRow(
+                    icon: model.serverVersion.isEmpty ? "number" : "checkmark.seal.fill",
+                    title: "Server version",
+                    value: model.serverVersion.isEmpty ? "Unknown" : model.serverVersion,
+                    isHealthy: !model.serverVersion.isEmpty
+                )
+
+                DiagnosticRow(
+                    icon: "point.3.connected.trianglepath.dotted",
+                    title: "Transport",
+                    value: model.connectionTransport,
+                    isHealthy: model.connectionState == .connected
+                )
+
+                DiagnosticRow(
+                    icon: model.lastDisconnectReason == "None" ? "checkmark.circle.fill" : "waveform.path.ecg",
+                    title: "Last disconnect",
+                    value: model.lastDisconnectReason,
+                    isHealthy: model.lastDisconnectReason == "None" || model.connectionState == .connected
+                )
+
+                DiagnosticRow(
                     icon: notificationStatus == "Allowed" ? "bell.badge.fill" : "bell.slash.fill",
                     title: "Notifications",
                     value: notificationStatus,
@@ -963,6 +991,13 @@ struct SettingsSheet: View {
             parts.append(checkedAt.formatted(date: .omitted, time: .shortened))
         }
         return parts.joined(separator: " - ")
+    }
+
+    private var selectedServerDiagnosticText: String {
+        guard let server = model.selectedServer else {
+            return "No server selected"
+        }
+        return "\(server.host):\(server.port)"
     }
 
     private var repairPairingSection: some View {
@@ -1258,7 +1293,21 @@ struct DiagnosticRow: View {
     let title: String
     let value: String
     let isHealthy: Bool
-    let refresh: () -> Void
+    let refresh: (() -> Void)?
+
+    init(
+        icon: String,
+        title: String,
+        value: String,
+        isHealthy: Bool,
+        refresh: (() -> Void)? = nil
+    ) {
+        self.icon = icon
+        self.title = title
+        self.value = value
+        self.isHealthy = isHealthy
+        self.refresh = refresh
+    }
 
     var body: some View {
         HStack(spacing: JC.Spacing.md) {
@@ -1279,12 +1328,14 @@ struct DiagnosticRow: View {
 
             Spacer()
 
-            Button(action: refresh) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 14, weight: .semibold))
+            if let refresh {
+                Button(action: refresh) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                .buttonStyle(GhostButton())
+                .accessibilityLabel("Refresh \(title)")
             }
-            .buttonStyle(GhostButton())
-            .accessibilityLabel("Refresh \(title)")
         }
         .glassCard()
     }

@@ -153,7 +153,7 @@ public enum ServerEvent: Decodable, Sendable {
     case reloading(newSocket: String?)
     case reloadProgress(step: String, message: String, success: Bool?, output: String?)
     case modelChanged(id: UInt64, model: String, providerName: String?, error: String?)
-    case notification(Notification)
+    case notification(ServerNotification)
     case swarmStatus(members: [SwarmMemberStatus])
     case mcpStatus(servers: [String])
     case softInterruptInjected(content: String, point: String, toolsSkipped: Int?)
@@ -271,7 +271,7 @@ public enum ServerEvent: Decodable, Sendable {
             self = .modelChanged(id: id, model: model, providerName: providerName, error: error)
 
         case "notification":
-            let notif = try Notification(from: decoder)
+            let notif = try ServerNotification(from: decoder)
             self = .notification(notif)
 
         case "swarm_status":
@@ -451,7 +451,7 @@ public struct SwarmMemberStatus: Codable, Sendable {
     }
 }
 
-public struct Notification: Decodable, Sendable {
+public struct ServerNotification: Decodable, Sendable {
     public let fromSession: String
     public let fromName: String?
     public let notificationType: NotificationType
