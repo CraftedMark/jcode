@@ -177,9 +177,9 @@ do {
         assertEqual(requests[0].timeoutSeconds, 300)
     } else { check(false, "Expected approvalRequests") }
 
-    let e16 = try decodeEvent(#"{"type":"reloading","new_socket":"ws://100.66.9.6:7643/ws"}"#)
+    let e16 = try decodeEvent(#"{"type":"reloading","new_socket":"ws://100.113.37.61:7643/ws"}"#)
     if case .reloading(let newSocket) = e16 {
-        assertEqual(newSocket, "ws://100.66.9.6:7643/ws")
+        assertEqual(newSocket, "ws://100.113.37.61:7643/ws")
     } else { check(false, "Expected reloading") }
 
     let e17 = try decodeEvent(#"{"type":"reload_progress","step":"launch","message":"Restart failed.","success":false,"output":"port in use"}"#)

@@ -114,16 +114,16 @@ func runClientTests() {
 
     do {
         print("  Gateway endpoint normalization...")
-        let http = GatewayEndpoint(host: "http://100.66.9.6:7643", port: 9999)
-        assertEqual2(http.host, "100.66.9.6")
+        let http = GatewayEndpoint(host: "http://100.113.37.61:7643", port: 9999)
+        assertEqual2(http.host, "100.113.37.61")
         assertEqual2(http.port, 7643)
 
         let ws = GatewayEndpoint(host: "ws://marks-mac.ts.net:7650/ws", port: 7643)
         assertEqual2(ws.host, "marks-mac.ts.net")
         assertEqual2(ws.port, 7650)
 
-        let hostPort = GatewayEndpoint(host: "100.66.9.6:7643", port: 9999)
-        assertEqual2(hostPort.host, "100.66.9.6")
+        let hostPort = GatewayEndpoint(host: "100.113.37.61:7643", port: 9999)
+        assertEqual2(hostPort.host, "100.113.37.61")
         assertEqual2(hostPort.port, 7643)
     }
 
