@@ -104,6 +104,8 @@ public protocol JCodeClientDelegate: AnyObject {
     func clientDidInterrupt(_ interrupt: InterruptInfo)
     func clientDidInjectSoftInterrupt(_ info: SoftInterruptInjectionInfo)
     func clientDidUpdateApprovals(_ approvals: [ApprovalRequestPayload])
+    func clientDidStartReload(newSocket: String?)
+    func clientDidUpdateReloadProgress(step: String, message: String, success: Bool?, output: String?)
 }
 
 @MainActor
@@ -116,6 +118,8 @@ public extension JCodeClientDelegate {
     func clientDidInterrupt(_ interrupt: InterruptInfo) {}
     func clientDidInjectSoftInterrupt(_ info: SoftInterruptInjectionInfo) {}
     func clientDidUpdateApprovals(_ approvals: [ApprovalRequestPayload]) {}
+    func clientDidStartReload(newSocket: String?) {}
+    func clientDidUpdateReloadProgress(step: String, message: String, success: Bool?, output: String?) {}
 }
 
 public actor JCodeClient {
@@ -293,7 +297,20 @@ public actor JCodeClient {
         case .approvalRequests(_, let requests):
             await callDelegate { $0.clientDidUpdateApprovals(requests) }
 
-        case .ack, .pong, .state, .reloading, .reloadProgress,
+        case .reloading(let newSocket):
+            await callDelegate { $0.clientDidStartReload(newSocket: newSocket) }
+
+        case .reloadProgress(let step, let message, let success, let output):
+            await callDelegate {
+                $0.clientDidUpdateReloadProgress(
+                    step: step,
+                    message: message,
+                    success: success,
+                    output: output
+                )
+            }
+
+        case .ack, .pong, .state,
              .notification, .swarmStatus, .mcpStatus,
              .memoryInjected,
              .splitResponse, .compactResult, .stdinRequest, .unknown:

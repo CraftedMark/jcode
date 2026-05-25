@@ -854,6 +854,34 @@ final class AppModel: ObservableObject {
         }
     }
 
+    fileprivate func onReloading(newSocket _: String?) {
+        isProcessing = false
+        statusMessage = "Server reloading. Reconnecting..."
+        errorMessage = nil
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"reloading"}}"#)
+    }
+
+    fileprivate func onReloadProgress(step: String, message: String, success: Bool?, output: String?) {
+        if success == false {
+            errorMessage = message
+        } else {
+            statusMessage = message
+        }
+
+        var fields = [
+            #""type":"reload_progress""#,
+            #""step":\#(step.jsonEscapedForMobileCore)"#,
+            #""message":\#(message.jsonEscapedForMobileCore)"#,
+        ]
+        if let success {
+            fields.append(#""success":\#(success ? "true" : "false")"#)
+        }
+        if let output {
+            fields.append(#""output":\#(output.jsonEscapedForMobileCore)"#)
+        }
+        dispatchCore(action: #"{"type":"apply_server_event","event":{\#(fields.joined(separator: ","))}}"#)
+    }
+
     fileprivate func onToolStart(_ tool: ToolCallInfo) {
         isProcessing = true
         attachTool(tool)
@@ -1038,5 +1066,15 @@ private final class ClientDelegate: JCodeClientDelegate {
     func clientDidUpdateApprovals(_ approvals: [ApprovalRequestPayload]) {
         guard guardCurrent() else { return }
         model.onApprovals(approvals)
+    }
+
+    func clientDidStartReload(newSocket: String?) {
+        guard guardCurrent() else { return }
+        model.onReloading(newSocket: newSocket)
+    }
+
+    func clientDidUpdateReloadProgress(step: String, message: String, success: Bool?, output: String?) {
+        guard guardCurrent() else { return }
+        model.onReloadProgress(step: step, message: message, success: success, output: output)
     }
 }

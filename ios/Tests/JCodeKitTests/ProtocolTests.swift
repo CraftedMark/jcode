@@ -176,6 +176,19 @@ do {
         assertEqual(requests[0].workspace, "/tmp/project")
         assertEqual(requests[0].timeoutSeconds, 300)
     } else { check(false, "Expected approvalRequests") }
+
+    let e16 = try decodeEvent(#"{"type":"reloading","new_socket":"ws://100.66.9.6:7643/ws"}"#)
+    if case .reloading(let newSocket) = e16 {
+        assertEqual(newSocket, "ws://100.66.9.6:7643/ws")
+    } else { check(false, "Expected reloading") }
+
+    let e17 = try decodeEvent(#"{"type":"reload_progress","step":"launch","message":"Restart failed.","success":false,"output":"port in use"}"#)
+    if case .reloadProgress(let step, let message, let success, let output) = e17 {
+        assertEqual(step, "launch")
+        assertEqual(message, "Restart failed.")
+        assertEqual(success, false)
+        assertEqual(output, "port in use")
+    } else { check(false, "Expected reloadProgress") }
 }
 
 // MARK: - History

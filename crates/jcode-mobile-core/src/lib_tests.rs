@@ -469,6 +469,52 @@ fn reconnect_effect_preserves_active_session() {
 }
 
 #[test]
+fn reload_event_exposes_clear_reconnect_state() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ChatStreaming));
+    store.dispatch(SimulatorAction::ApplyServerEvent {
+        event: protocol::MobileServerEvent::Reloading { new_socket: None },
+    });
+
+    assert_eq!(store.state().connection_state, ConnectionState::Connecting);
+    assert!(!store.state().is_processing);
+    assert_eq!(
+        store.state().status_message.as_deref(),
+        Some("Server reloading. Reconnecting...")
+    );
+    assert_eq!(store.state().active_tool_id, None);
+}
+
+#[test]
+fn reload_progress_surfaces_success_and_failure_messages() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    store.dispatch(SimulatorAction::ApplyServerEvent {
+        event: protocol::MobileServerEvent::ReloadProgress {
+            step: "build".to_string(),
+            message: "Rebuild complete.".to_string(),
+            success: Some(true),
+            output: None,
+        },
+    });
+    assert_eq!(
+        store.state().status_message.as_deref(),
+        Some("Rebuild complete.")
+    );
+
+    store.dispatch(SimulatorAction::ApplyServerEvent {
+        event: protocol::MobileServerEvent::ReloadProgress {
+            step: "launch".to_string(),
+            message: "Restart failed.".to_string(),
+            success: Some(false),
+            output: Some("port already in use".to_string()),
+        },
+    });
+    assert_eq!(
+        store.state().error_message.as_deref(),
+        Some("Restart failed.")
+    );
+}
+
+#[test]
 fn interrupted_event_removes_empty_assistant_placeholder() {
     let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
     store.dispatch(SimulatorAction::ReplaceAssistantText {
