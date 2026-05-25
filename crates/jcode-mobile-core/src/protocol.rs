@@ -465,8 +465,11 @@ pub struct HistoryToolData {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MobileNotification {
-    pub title: String,
-    pub body: String,
+    pub from_session: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_name: Option<String>,
+    pub notification_type: Value,
+    pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub level: Option<String>,
 }
@@ -629,6 +632,32 @@ mod tests {
         assert_eq!(id, 78);
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].risk, "high");
+    }
+
+    #[test]
+    fn mobile_notification_event_decodes_gateway_shape() {
+        let event: Result<MobileServerEvent, _> = serde_json::from_value(json!({
+            "type":"notification",
+            "from_session":"sess_a",
+            "from_name":"fox",
+            "notification_type":{
+                "kind":"file_conflict",
+                "path":"src/main.rs",
+                "operation":"wrote"
+            },
+            "message":"fox edited src/main.rs"
+        }));
+        assert!(event.is_ok(), "notification event should decode");
+        let Ok(MobileServerEvent::Notification(notification)) = event else {
+            return;
+        };
+        assert_eq!(notification.from_session, "sess_a");
+        assert_eq!(notification.from_name.as_deref(), Some("fox"));
+        assert_eq!(notification.message, "fox edited src/main.rs");
+        assert_eq!(
+            notification.notification_type,
+            json!({"kind":"file_conflict","path":"src/main.rs","operation":"wrote"})
+        );
     }
 
     #[test]

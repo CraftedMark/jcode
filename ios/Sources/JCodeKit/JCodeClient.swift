@@ -106,6 +106,7 @@ public protocol JCodeClientDelegate: AnyObject {
     func clientDidUpdateApprovals(_ approvals: [ApprovalRequestPayload])
     func clientDidStartReload(newSocket: String?)
     func clientDidUpdateReloadProgress(step: String, message: String, success: Bool?, output: String?)
+    func clientDidReceiveNotification(_ notification: Notification)
 }
 
 @MainActor
@@ -120,6 +121,7 @@ public extension JCodeClientDelegate {
     func clientDidUpdateApprovals(_ approvals: [ApprovalRequestPayload]) {}
     func clientDidStartReload(newSocket: String?) {}
     func clientDidUpdateReloadProgress(step: String, message: String, success: Bool?, output: String?) {}
+    func clientDidReceiveNotification(_ notification: Notification) {}
 }
 
 public actor JCodeClient {
@@ -310,8 +312,11 @@ public actor JCodeClient {
                 )
             }
 
+        case .notification(let notification):
+            await callDelegate { $0.clientDidReceiveNotification(notification) }
+
         case .ack, .pong, .state,
-             .notification, .swarmStatus, .mcpStatus,
+             .swarmStatus, .mcpStatus,
              .memoryInjected,
              .splitResponse, .compactResult, .stdinRequest, .unknown:
             break

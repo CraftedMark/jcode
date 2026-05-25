@@ -882,6 +882,24 @@ final class AppModel: ObservableObject {
         dispatchCore(action: #"{"type":"apply_server_event","event":{\#(fields.joined(separator: ","))}}"#)
     }
 
+    fileprivate func onServerNotification(_ notification: JCodeKit.Notification) {
+        statusMessage = notification.message
+        notifications.notify(
+            title: "jcode notification",
+            body: "Open jcode to review the latest server notification.",
+            identifier: "jcode.server-notification.\(UUID().uuidString)"
+        )
+
+        let fields = [
+            #""type":"notification""#,
+            #""from_session":\#(notification.fromSession.jsonEscapedForMobileCore)"#,
+            #""from_name":\#(notification.fromName?.jsonEscapedForMobileCore ?? "null")"#,
+            #""notification_type":\#(notification.notificationType.mobileCoreJson)"#,
+            #""message":\#(notification.message.jsonEscapedForMobileCore)"#,
+        ]
+        dispatchCore(action: #"{"type":"apply_server_event","event":{\#(fields.joined(separator: ","))}}"#)
+    }
+
     fileprivate func onToolStart(_ tool: ToolCallInfo) {
         isProcessing = true
         attachTool(tool)
@@ -1076,5 +1094,44 @@ private final class ClientDelegate: JCodeClientDelegate {
     func clientDidUpdateReloadProgress(step: String, message: String, success: Bool?, output: String?) {
         guard guardCurrent() else { return }
         model.onReloadProgress(step: step, message: message, success: success, output: output)
+    }
+
+    func clientDidReceiveNotification(_ notification: JCodeKit.Notification) {
+        guard guardCurrent() else { return }
+        model.onServerNotification(notification)
+    }
+}
+
+extension NotificationType {
+    var mobileCoreJson: String {
+        switch self {
+        case .fileConflict(let path, let operation):
+            return [
+                #""kind":"file_conflict""#,
+                #""path":\#(path.jsonEscapedForMobileCore)"#,
+                #""operation":\#(operation.jsonEscapedForMobileCore)"#,
+            ].joined(prefix: "{", separator: ",", suffix: "}")
+        case .sharedContext(let key, let value):
+            return [
+                #""kind":"shared_context""#,
+                #""key":\#(key.jsonEscapedForMobileCore)"#,
+                #""value":\#(value.jsonEscapedForMobileCore)"#,
+            ].joined(prefix: "{", separator: ",", suffix: "}")
+        case .message(let scope, let channel):
+            var fields = [#""kind":"message""#]
+            if let scope {
+                fields.append(#""scope":\#(scope.jsonEscapedForMobileCore)"#)
+            }
+            if let channel {
+                fields.append(#""channel":\#(channel.jsonEscapedForMobileCore)"#)
+            }
+            return fields.joined(prefix: "{", separator: ",", suffix: "}")
+        }
+    }
+}
+
+private extension Array where Element == String {
+    func joined(prefix: String, separator: String, suffix: String) -> String {
+        prefix + joined(separator: separator) + suffix
     }
 }

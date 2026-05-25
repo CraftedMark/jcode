@@ -1358,7 +1358,11 @@ fn apply_server_event(state: &mut SimulatorState, event: protocol::MobileServerE
             }
         }
         protocol::MobileServerEvent::Notification(notification) => {
-            state.status_message = Some(format!("{}: {}", notification.title, notification.body));
+            let sender = notification
+                .from_name
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or(notification.from_session);
+            state.status_message = Some(format!("{sender}: {}", notification.message));
         }
         protocol::MobileServerEvent::StdinRequest { prompt, .. } => {
             state.messages.push(ChatMessage {

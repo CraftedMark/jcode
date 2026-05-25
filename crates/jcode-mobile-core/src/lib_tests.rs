@@ -515,6 +515,29 @@ fn reload_progress_surfaces_success_and_failure_messages() {
 }
 
 #[test]
+fn server_notification_uses_gateway_notification_shape() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    store.dispatch(SimulatorAction::ApplyServerEvent {
+        event: protocol::MobileServerEvent::Notification(protocol::MobileNotification {
+            from_session: "sess_a".to_string(),
+            from_name: Some("fox".to_string()),
+            notification_type: serde_json::json!({
+                "kind": "file_conflict",
+                "path": "src/main.rs",
+                "operation": "wrote"
+            }),
+            message: "fox edited src/main.rs".to_string(),
+            level: None,
+        }),
+    });
+
+    assert_eq!(
+        store.state().status_message.as_deref(),
+        Some("fox: fox edited src/main.rs")
+    );
+}
+
+#[test]
 fn interrupted_event_removes_empty_assistant_placeholder() {
     let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
     store.dispatch(SimulatorAction::ReplaceAssistantText {
