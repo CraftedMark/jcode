@@ -11,6 +11,7 @@ RUNTIME_DIR="${JCODE_RUNTIME_DIR:-${TMPDIR:-/tmp}/jcode-conductor-$RUNTIME_KEY}"
 rm -rf "$RUNTIME_DIR"
 
 rm -rf \
+  .context/conductor \
   .context/DerivedData \
   ios/.build \
   ios/JCodeMobile.xcodeproj \
