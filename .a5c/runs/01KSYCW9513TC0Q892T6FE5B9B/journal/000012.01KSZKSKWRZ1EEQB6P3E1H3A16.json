@@ -1,0 +1,9 @@
+{
+  "type": "RUN_COMPLETED",
+  "recordedAt": "2026-05-31T18:12:32.280Z",
+  "data": {
+    "harness": "codex",
+    "outputRef": "state/output.json"
+  },
+  "checksum": "eacfa4d5855eff4248f70c9d6fdc02c9fa7f2d0cd157003702a06a48ba366883"
+}

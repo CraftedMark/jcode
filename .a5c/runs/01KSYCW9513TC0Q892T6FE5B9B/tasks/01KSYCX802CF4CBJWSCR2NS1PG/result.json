@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "2026.01.results-v1",
+  "effectId": "01KSYCX802CF4CBJWSCR2NS1PG",
+  "taskId": "jcode-mobile-prd-implement",
+  "invocationKey": "local/jcode-mobile-prd-finish:S000002:jcode-mobile-prd-implement",
+  "status": "ok",
+  "result": {
+    "filesChanged": [
+      "crates/jcode-mobile-core/src/protocol.rs",
+      "crates/jcode-mobile-core/src/lib.rs",
+      "crates/jcode-mobile-core/src/lib_tests.rs",
+      "ios/Sources/JCodeKit/Protocol.swift",
+      "ios/Sources/JCodeKit/JCodeClient.swift",
+      "ios/Sources/JCodeMobile/MobileCoreBridge.swift",
+      "ios/Sources/JCodeMobile/AppModel.swift",
+      "ios/Sources/JCodeMobile/ContentView.swift",
+      "docs/JCODE_MOBILE_PRD.md",
+      ".context/jcode-mobile-prd-handoff.md"
+    ],
+    "risks": [
+      "Physical iPhone/live gateway acceptance still pending.",
+      "Generic simulator build still requires an x86_64 simulator slice in JCodeMobileCore.xcframework or an arm64-only build setting."
+    ],
+    "success": true,
+    "summary": "Implemented shared-core mobile diagnostics/model/reconnect parity for current server events; updated Swift bridge and Settings diagnostics; refreshed PRD and local handoff.",
+    "verification": [
+      "cargo test -p jcode-mobile-core",
+      "cargo test -p jcode-mobile-sim",
+      "cargo check -p jcode-mobile-core -p jcode-mobile-sim",
+      "swift run --package-path ios JCodeKitTests",
+      "git diff --check",
+      "xcodebuild -project ios/JCodeMobile.xcodeproj -scheme JCodeMobile -destination generic/platform=iOS Simulator ARCHS=arm64 ONLY_ACTIVE_ARCH=YES build"
+    ]
+  },
+  "startedAt": "2026-05-31T18:11:38.228Z",
+  "finishedAt": "2026-05-31T18:11:38.228Z",
+  "value": {
+    "filesChanged": [
+      "crates/jcode-mobile-core/src/protocol.rs",
+      "crates/jcode-mobile-core/src/lib.rs",
+      "crates/jcode-mobile-core/src/lib_tests.rs",
+      "ios/Sources/JCodeKit/Protocol.swift",
+      "ios/Sources/JCodeKit/JCodeClient.swift",
+      "ios/Sources/JCodeMobile/MobileCoreBridge.swift",
+      "ios/Sources/JCodeMobile/AppModel.swift",
+      "ios/Sources/JCodeMobile/ContentView.swift",
+      "docs/JCODE_MOBILE_PRD.md",
+      ".context/jcode-mobile-prd-handoff.md"
+    ],
+    "risks": [
+      "Physical iPhone/live gateway acceptance still pending.",
+      "Generic simulator build still requires an x86_64 simulator slice in JCodeMobileCore.xcframework or an arm64-only build setting."
+    ],
+    "success": true,
+    "summary": "Implemented shared-core mobile diagnostics/model/reconnect parity for current server events; updated Swift bridge and Settings diagnostics; refreshed PRD and local handoff.",
+    "verification": [
+      "cargo test -p jcode-mobile-core",
+      "cargo test -p jcode-mobile-sim",
+      "cargo check -p jcode-mobile-core -p jcode-mobile-sim",
+      "swift run --package-path ios JCodeKitTests",
+      "git diff --check",
+      "xcodebuild -project ios/JCodeMobile.xcodeproj -scheme JCodeMobile -destination generic/platform=iOS Simulator ARCHS=arm64 ONLY_ACTIVE_ARCH=YES build"
+    ]
+  }
+}
