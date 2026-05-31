@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in */.jcode/builds/*|*/.jcode/auth.json|*/.jcode/openai-auth.json|*/.jcode/gemini_oauth.json|*/.jcode/azure-auth.json|*/.jcode/config.toml|*/.jcode/memory/*|*/.jcode/skills/*|*/.local/bin/jcode|*/target/*) echo 'Blocked: protected jcode self-dev/auth/runtime path. Use scripts/install_release.sh or the jcode CLI, never a direct edit.' >&2; exit 2 ;; esac"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.rs) rustfmt --edition 2024 \"$f\" 2>/dev/null || true ;; esac"
+          }
+        ]
+      }
+    ]
+  }
+}
