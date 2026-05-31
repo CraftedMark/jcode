@@ -1,0 +1,22 @@
+{
+  "type": "EFFECT_REQUESTED",
+  "recordedAt": "2026-05-31T06:52:32.550Z",
+  "data": {
+    "harness": "codex",
+    "effectId": "01KSYCWGCKWABMEFKF6MRKAX8Z",
+    "invocationKey": "local/jcode-mobile-prd-finish:S000001:jcode-mobile-prd-audit",
+    "invocationHash": "f18e5aaffa7f71f1fd080f9bf33fb76615eab64699288b3f55b90f3bfb9ca4b3",
+    "stepId": "S000001",
+    "taskId": "jcode-mobile-prd-audit",
+    "kind": "agent",
+    "label": "jcode",
+    "taskDefRef": "tasks/01KSYCWGCKWABMEFKF6MRKAX8Z/task.json",
+    "labels": [
+      "jcode",
+      "mobile",
+      "prd",
+      "audit"
+    ]
+  },
+  "checksum": "30c36974ad4f069a791790f754b8409d569d348b1383f0563f711ff0a95e47d8"
+}

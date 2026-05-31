@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "2026.01.results-v1",
+  "effectId": "01KSZKS32S64T9MNBWX5PZ2G9V",
+  "taskId": "jcode-mobile-prd-final-review",
+  "invocationKey": "local/jcode-mobile-prd-finish:S000005:jcode-mobile-prd-final-review",
+  "status": "ok",
+  "result": {
+    "remainingWork": [
+      "Run physical iPhone acceptance against live jcode serve gateway.",
+      "Validate real diagnostics failure modes and transport changes.",
+      "Audit and retire remaining Swift-owned semantic reducers.",
+      "Add APNs, Live Activities, and lock-screen privacy controls.",
+      "Package x86_64 simulator slice or make simulator builds explicitly arm64-only."
+    ],
+    "success": true,
+    "summary": "Final review passed: implementation matches the selected PRD slice, docs distinguish local verification from remaining live/device work, Rust/Swift/package checks pass, and the arm64 iOS simulator app build passes."
+  },
+  "startedAt": "2026-05-31T18:12:28.914Z",
+  "finishedAt": "2026-05-31T18:12:28.914Z",
+  "value": {
+    "remainingWork": [
+      "Run physical iPhone acceptance against live jcode serve gateway.",
+      "Validate real diagnostics failure modes and transport changes.",
+      "Audit and retire remaining Swift-owned semantic reducers.",
+      "Add APNs, Live Activities, and lock-screen privacy controls.",
+      "Package x86_64 simulator slice or make simulator builds explicitly arm64-only."
+    ],
+    "success": true,
+    "summary": "Final review passed: implementation matches the selected PRD slice, docs distinguish local verification from remaining live/device work, Rust/Swift/package checks pass, and the arm64 iOS simulator app build passes."
+  }
+}

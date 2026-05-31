@@ -100,6 +100,10 @@ public protocol JCodeClientDelegate: AnyObject {
     func clientDidReceiveError(id: UInt64, message: String)
     func clientDidUpdateTokens(_ update: TokenUpdate)
     func clientDidChangeModel(model: String, provider: String?)
+    func clientDidUpdateAvailableModels(provider: String?, model: String?, models: [String])
+    func clientDidUpdateConnectionType(_ connection: String)
+    func clientDidUpdateConnectionPhase(_ phase: String)
+    func clientDidUpdateStatusDetail(_ detail: String)
     func clientDidReceiveHistory(messages: [HistoryMessage])
     func clientDidInterrupt(_ interrupt: InterruptInfo)
     func clientDidInjectSoftInterrupt(_ info: SoftInterruptInjectionInfo)
@@ -115,6 +119,10 @@ public extension JCodeClientDelegate {
     func clientDidReceiveToolInput(_ delta: String) {}
     func clientDidUpdateTokens(_ update: TokenUpdate) {}
     func clientDidChangeModel(model: String, provider: String?) {}
+    func clientDidUpdateAvailableModels(provider: String?, model: String?, models: [String]) {}
+    func clientDidUpdateConnectionType(_ connection: String) {}
+    func clientDidUpdateConnectionPhase(_ phase: String) {}
+    func clientDidUpdateStatusDetail(_ detail: String) {}
     func clientDidReceiveHistory(messages: [HistoryMessage]) {}
     func clientDidInterrupt(_ interrupt: InterruptInfo) {}
     func clientDidInjectSoftInterrupt(_ info: SoftInterruptInjectionInfo) {}
@@ -285,6 +293,28 @@ public actor JCodeClient {
             serverInfo.providerModel = model
             if let p = provider { serverInfo.providerName = p }
             await callDelegate { $0.clientDidChangeModel(model: model, provider: provider) }
+
+        case .availableModelsUpdated(let providerName, let providerModel, let models):
+            if let providerName { serverInfo.providerName = providerName }
+            if let providerModel { serverInfo.providerModel = providerModel }
+            serverInfo.availableModels = models
+            await callDelegate {
+                $0.clientDidUpdateAvailableModels(
+                    provider: providerName,
+                    model: providerModel,
+                    models: models
+                )
+            }
+
+        case .connectionType(let connection):
+            serverInfo.connectionType = connection
+            await callDelegate { $0.clientDidUpdateConnectionType(connection) }
+
+        case .connectionPhase(let phase):
+            await callDelegate { $0.clientDidUpdateConnectionPhase(phase) }
+
+        case .statusDetail(let detail):
+            await callDelegate { $0.clientDidUpdateStatusDetail(detail) }
 
         case .upstreamProvider:
             break

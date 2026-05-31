@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "2026.01.results-v1",
+  "effectId": "01KSZKRT5EF8295RS28A50NRBE",
+  "taskId": "jcode-mobile-prd-docs",
+  "invocationKey": "local/jcode-mobile-prd-finish:S000004:jcode-mobile-prd-docs",
+  "status": "ok",
+  "result": {
+    "filesChanged": [
+      "docs/JCODE_MOBILE_PRD.md",
+      ".context/jcode-mobile-prd-handoff.md"
+    ],
+    "success": true,
+    "summary": "Updated PRD status/current state/milestones/next slice and recorded handoff evidence. Wording distinguishes local verification from remaining physical-device, APNs, Live Activities, and FFI packaging work."
+  },
+  "startedAt": "2026-05-31T18:12:10.946Z",
+  "finishedAt": "2026-05-31T18:12:10.946Z",
+  "value": {
+    "filesChanged": [
+      "docs/JCODE_MOBILE_PRD.md",
+      ".context/jcode-mobile-prd-handoff.md"
+    ],
+    "success": true,
+    "summary": "Updated PRD status/current state/milestones/next slice and recorded handoff evidence. Wording distinguishes local verification from remaining physical-device, APNs, Live Activities, and FFI packaging work."
+  }
+}

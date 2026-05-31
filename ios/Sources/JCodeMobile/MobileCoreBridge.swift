@@ -73,6 +73,10 @@ struct MobileCoreState: Decodable {
     let sessions: [String]
     let availableModels: [String]
     let modelName: String?
+    let providerName: String?
+    let connectionTransport: String?
+    let connectionPhase: String?
+    let statusDetail: String?
     let isProcessing: Bool
     let pendingApprovals: [MobileCoreApproval]
 
@@ -86,6 +90,10 @@ struct MobileCoreState: Decodable {
         case sessions
         case availableModels = "available_models"
         case modelName = "model_name"
+        case providerName = "provider_name"
+        case connectionTransport = "connection_transport"
+        case connectionPhase = "connection_phase"
+        case statusDetail = "status_detail"
         case isProcessing = "is_processing"
         case pendingApprovals = "pending_approvals"
     }
@@ -131,6 +139,7 @@ struct MobileCoreSnapshot {
             state.connectionState,
             "\(state.messages.count) messages",
             state.modelName ?? "no model",
+            state.connectionPhase ?? "no phase",
             "\(state.pendingApprovals.count) approvals",
         ].joined(separator: " - ")
     }

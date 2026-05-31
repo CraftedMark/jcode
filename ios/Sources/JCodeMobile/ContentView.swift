@@ -957,6 +957,29 @@ struct SettingsSheet: View {
                 )
 
                 DiagnosticRow(
+                    icon: model.connectionPhase == "Unknown" ? "waveform.path.ecg" : "checkmark.circle.fill",
+                    title: "Connection phase",
+                    value: model.connectionPhase,
+                    isHealthy: model.connectionPhase != "Unknown"
+                )
+
+                DiagnosticRow(
+                    icon: model.providerName.isEmpty ? "cpu" : "checkmark.seal.fill",
+                    title: "Provider",
+                    value: model.providerName.isEmpty ? "Unknown" : model.providerName,
+                    isHealthy: !model.providerName.isEmpty
+                )
+
+                if !model.statusDetail.isEmpty {
+                    DiagnosticRow(
+                        icon: "text.bubble",
+                        title: "Status detail",
+                        value: model.statusDetail,
+                        isHealthy: true
+                    )
+                }
+
+                DiagnosticRow(
                     icon: model.lastDisconnectReason == "None" ? "checkmark.circle.fill" : "waveform.path.ecg",
                     title: "Last disconnect",
                     value: model.lastDisconnectReason,

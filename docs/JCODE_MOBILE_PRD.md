@@ -1,7 +1,7 @@
 # JCode Mobile PRD
 
-> Status: Draft v0.1
-> Updated: 2026-05-24
+> Status: Draft v0.2
+> Updated: 2026-05-31
 > Product direction: Native iOS host, shared Rust mobile core
 
 ## Summary
@@ -94,12 +94,31 @@ Already implemented:
 - Physical iPhone build, install, and launch path using the local Apple
   Development team.
 - Verified gateway connectivity on port `7643` when `jcode serve` is running.
+- Mobile session state, tool-call state, and chat streaming live in
+  `jcode-mobile-core` (Swift no longer owns these reducers).
+- Rust ↔ Swift FFI bridge: `jcode-mobile-ffi` is linked into the iOS app, and
+  the iOS host dispatches state transitions through the Rust core.
+- Mobile approvals slice: approval state in core, decision protocol, request
+  polling, and gateway wiring for allow/deny actions from the device.
+- Mobile notification bridge for surfacing server-side events to the iOS host.
+- Hardened pairing (re-pairing supported), stabilized speech permission and
+  dictation flow, and stabilized QR-scanner capture queue.
+- Model visibility, reconnect/reload diagnostic state, connection transport,
+  connection phase, and status detail now flow through `jcode-mobile-core` and
+  the Swift bridge for locally verifiable server events.
+- Settings diagnostics view shows selected server, app version, server version,
+  transport, connection phase, provider, status detail, last disconnect,
+  notification status, and gateway health.
 
-Important gap:
+Open gaps:
 
-Swift still owns too much product behavior in the prototype. The next work
-should continue moving session, model, reconnect, protocol, storage, and
-semantic UI behavior into Rust, then wire the iOS host through a stable bridge.
+- Remaining semantic UI surfaces and platform lifecycle effects still need to
+  be audited so Swift only hosts platform effects and presentation.
+- APNs registration, Live Activities, and privacy/lock-screen controls for
+  approvals and notifications are not yet wired.
+- Diagnostics still need real-device and live-gateway acceptance, including
+  safe log excerpts and failure classification beyond the locally replayed
+  event set.
 
 ## Architecture
 
@@ -352,25 +371,33 @@ Status: Done.
 
 ### M1: Shared Core Parity
 
-Status: In progress.
+Status: Locally verified for the current shared-core event set — pairing,
+chat send/stream, tool-call state, session state, model visibility, reconnect
+diagnostics, connection transport, connection phase, and status detail live in
+Rust and are replayed through the Swift bridge.
 
-- Pairing validation in Rust.
-- Chat send and streaming behavior in Rust.
-- Tool-call state in Rust.
-- Add session list, active session, model state, reconnect policy, and protocol
-  event interpretation to Rust.
-- Add simulator scenarios for success, disconnect, reconnect, reload, and
-  server error flows.
+- ✅ Pairing validation in Rust.
+- ✅ Chat send and streaming behavior in Rust.
+- ✅ Tool-call state in Rust.
+- ✅ Session state moved into core; sessions are preserved across reconnect.
+- ✅ Model state and current protocol-event interpretation surfaces land in
+  core for available model updates, model changes, connection type, connection
+  phase, status detail, disconnect, and reload events.
+- ⬜ Add broader simulator scenarios for full success, disconnect, reconnect,
+  reload, stale-event, and server-error flows.
 
 ### M2: iOS Host Bridge
 
-Status: Next major build slice.
+Status: In progress.
 
-- Add a serialized Rust-to-Swift bridge, initially JSON over a small C ABI.
-- Swift dispatches user actions to Rust and renders Rust state or semantic UI.
-- Swift executes platform effects for Keychain, HTTP pairing, WebSocket,
-  camera, speech, and lifecycle.
-- Remove duplicated Swift reducers once covered by Rust.
+- ✅ Rust ↔ Swift FFI bridge (`jcode-mobile-ffi`) and bridge tooling landed.
+- ✅ Rust mobile core linked into the iOS app; module linkage fixed.
+- ✅ iOS app state dispatch routed through the Rust core.
+- ✅ iOS host forwards connection/model/diagnostic server events through the
+  Rust reducer and reflects the resulting state in Settings diagnostics.
+- ⬜ Swift executes platform effects for Keychain, HTTP pairing, WebSocket,
+  camera, speech, and lifecycle — partially wired, audit remaining surfaces.
+- ⬜ Remove duplicated Swift reducers once covered by Rust.
 
 ### M3: Real Device Beta
 
@@ -379,17 +406,23 @@ Status: Planned.
 - Pair from the installed iPhone app to the desktop gateway.
 - Connect, subscribe, send chat, stream output, display tools, switch sessions,
   reconnect, and recover from gateway restart.
-- Add diagnostics view.
+- Validate the diagnostics view on a physical iPhone against the live gateway,
+  including connection phase, provider/model, status detail, disconnect reason,
+  and gateway health.
 - Run acceptance on the physical iPhone using the user's Apple Development team.
 
 ### M4: Approvals and Notifications
 
-Status: Planned.
+Status: In progress — core approvals slice and the in-app notification bridge
+have landed; APNs / Live Activities / privacy controls are still ahead.
 
-- Add approval request rendering and allow/deny actions.
-- Add APNs registration and server notification routing.
-- Add Live Activity for active or blocked work.
-- Add privacy controls for lock-screen content.
+- ✅ Approval state, decision protocol, request polling, and gateway wiring
+  for allow/deny actions from the device.
+- ✅ Mobile notification bridge for in-app surfacing of server events.
+- ⬜ Approval-request rendering polish in the iOS host.
+- ⬜ APNs registration and server notification routing.
+- ⬜ Live Activity for active or blocked work.
+- ⬜ Privacy controls for lock-screen content.
 
 ### M5: TestFlight Candidate
 
@@ -466,7 +499,15 @@ Regression scenarios:
 
 ## Next Build Slice
 
-The next highest-leverage slice is **M1 session, model, reconnect, and protocol
-event parity in Rust**, followed immediately by the **M2 Swift host bridge**.
-That sequence keeps the app native without building product behavior twice.
+The next highest-leverage slice is **M2 reducer retirement plus M3 real-device
+diagnostics acceptance**. Audit remaining Swift-owned semantic state, move any
+remaining product reducers into `jcode-mobile-core`, then run a physical iPhone
+gateway loop that proves pair, connect, chat, stream, model state, reconnect,
+reload recovery, and diagnostics against a live `jcode serve`.
 
+Current local verification for the May 31 shared-core diagnostics slice:
+
+- `cargo test -p jcode-mobile-core`
+- `cargo test -p jcode-mobile-sim`
+- `cargo check -p jcode-mobile-core -p jcode-mobile-sim`
+- `swift run --package-path ios JCodeKitTests`

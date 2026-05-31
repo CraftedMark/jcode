@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::Parser;
 use jcode::id::new_id;
 use jcode::message::{Message, ToolDefinition};
@@ -56,17 +56,25 @@ struct ToolCase {
     name: &'static str,
     input: serde_json::Value,
     label: &'static str,
+    check: ToolCheck,
+}
+
+#[derive(Clone, Copy)]
+enum ToolCheck {
+    OutputContains(&'static str),
+    OutputContainsAll(&'static [&'static str]),
+    OutputContainsWorkspacePath,
+    WorkspaceFileEquals {
+        path: &'static str,
+        content: &'static str,
+    },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    let workspace = if let Some(cwd) = args.cwd {
-        PathBuf::from(cwd)
-    } else {
-        create_temp_workspace()?
-    };
+    let workspace = resolve_workspace(args.cwd)?;
 
     std::fs::create_dir_all(&workspace)?;
     std::env::set_current_dir(&workspace)?;
@@ -91,16 +99,25 @@ async fn main() -> Result<()> {
         name: "write",
         label: "write sample.txt",
         input: json!({"file_path": "sample.txt", "content": "alpha\nbeta\n"}),
+        check: ToolCheck::WorkspaceFileEquals {
+            path: "sample.txt",
+            content: "alpha\nbeta\n",
+        },
     });
     cases.push(ToolCase {
         name: "read",
         label: "read sample.txt",
         input: json!({"file_path": "sample.txt"}),
+        check: ToolCheck::OutputContainsAll(&["alpha", "beta"]),
     });
     cases.push(ToolCase {
         name: "edit",
         label: "edit sample.txt (alpha -> alpha1)",
         input: json!({"file_path": "sample.txt", "old_string": "alpha", "new_string": "alpha1"}),
+        check: ToolCheck::WorkspaceFileEquals {
+            path: "sample.txt",
+            content: "alpha1\nbeta\n",
+        },
     });
     cases.push(ToolCase {
         name: "multiedit",
@@ -112,51 +129,70 @@ async fn main() -> Result<()> {
                 {"old_string": "beta", "new_string": "beta1"}
             ]
         }),
+        check: ToolCheck::WorkspaceFileEquals {
+            path: "sample.txt",
+            content: "alpha2\nbeta1\n",
+        },
     });
     cases.push(ToolCase {
         name: "patch",
         label: "patch sample.txt",
         input: json!({"patch_text": "--- a/sample.txt\n+++ b/sample.txt\n@@ -1,2 +1,3 @@\n alpha2\n beta1\n+gamma\n"}),
+        check: ToolCheck::WorkspaceFileEquals {
+            path: "sample.txt",
+            content: "alpha2\nbeta1\ngamma\n",
+        },
     });
     cases.push(ToolCase {
         name: "apply_patch",
         label: "apply_patch add file",
         input: json!({"patch_text": "*** Begin Patch\n*** Add File: added.txt\n+added\n*** End Patch\n"}),
+        check: ToolCheck::WorkspaceFileEquals {
+            path: "added.txt",
+            content: "added\n",
+        },
     });
     cases.push(ToolCase {
         name: "ls",
         label: "ls .",
         input: json!({"path": "."}),
+        check: ToolCheck::OutputContainsAll(&["added.txt", "sample.txt"]),
     });
     cases.push(ToolCase {
         name: "glob",
         label: "glob *.txt",
         input: json!({"pattern": "*.txt"}),
+        check: ToolCheck::OutputContainsAll(&["added.txt", "sample.txt"]),
     });
     cases.push(ToolCase {
         name: "grep",
         label: "grep gamma",
         input: json!({"pattern": "gamma", "path": "."}),
+        check: ToolCheck::OutputContains("gamma"),
     });
     cases.push(ToolCase {
         name: "bash",
         label: "bash pwd",
         input: json!({"command": "pwd"}),
+        check: ToolCheck::OutputContainsWorkspacePath,
     });
     cases.push(ToolCase {
         name: "invalid",
         label: "invalid tool call",
         input: json!({"tool": "unknown", "error": "missing required field"}),
+        check: ToolCheck::OutputContains("Invalid tool invocation for 'unknown'"),
     });
     cases.push(ToolCase {
         name: "todo",
         label: "todo write",
         input: json!({"todos": [{"content": "harness task", "status": "pending", "priority": "low", "id": "1"}]}),
+        check: ToolCheck::OutputContains("harness task"),
     });
     cases.push(ToolCase {
         name: "todo",
         label: "todo read",
         input: json!({}),
+        check: ToolCheck::OutputContains("harness task"),
     });
     cases.push(ToolCase {
         name: "batch",
@@ -167,6 +203,7 @@ async fn main() -> Result<()> {
                 {"tool": "read", "parameters": {"file_path": "sample.txt"}}
             ]
         }),
+        check: ToolCheck::OutputContainsAll(&["Completed: 2 succeeded, 0 failed", "gamma"]),
     });
 
     if args.include_network {
@@ -174,18 +211,23 @@ async fn main() -> Result<()> {
             name: "webfetch",
             label: "webfetch example.com",
             input: json!({"url": "https://example.com", "format": "text"}),
+            check: ToolCheck::OutputContains("Example Domain"),
         });
         cases.push(ToolCase {
             name: "websearch",
             label: "websearch rust async",
             input: json!({"query": "rust async await"}),
+            check: ToolCheck::OutputContains("rust"),
         });
         cases.push(ToolCase {
             name: "codesearch",
             label: "codesearch tokio spawn",
             input: json!({"query": "tokio::spawn"}),
+            check: ToolCheck::OutputContains("tokio"),
         });
     }
+
+    let mut failures = Vec::new();
 
     for (idx, case) in cases.iter().enumerate() {
         let ctx = ToolContext {
@@ -199,18 +241,119 @@ async fn main() -> Result<()> {
                     println!("[title] {}", title);
                 }
                 println!("{}", output.output);
+                if let Err(err) = verify_case(case, &output.output, &workspace) {
+                    println!("[check] FAIL: {}", err);
+                    failures.push(format!("{}: {}", case.label, err));
+                } else {
+                    println!("[check] ok");
+                }
             }
             Err(err) => {
                 println!("[error] {}", err);
+                failures.push(format!("{}: tool returned error: {}", case.label, err));
             }
         }
     }
 
+    if !failures.is_empty() {
+        println!("\nHarness failed {} check(s):", failures.len());
+        for failure in failures {
+            println!(" - {}", failure);
+        }
+        return Err(anyhow!("tool harness checks failed"));
+    }
+
+    println!("\nHarness passed {} check(s).", cases.len());
     Ok(())
+}
+
+fn resolve_workspace(cwd: Option<String>) -> Result<PathBuf> {
+    if let Some(cwd) = cwd {
+        absolutize_path(PathBuf::from(cwd))
+    } else {
+        create_temp_workspace()
+    }
 }
 
 fn create_temp_workspace() -> Result<PathBuf> {
     let mut path = std::env::temp_dir();
     path.push(format!("jcode-harness-{}", new_id("run")));
-    Ok(path)
+    absolutize_path(path)
+}
+
+fn absolutize_path(path: PathBuf) -> Result<PathBuf> {
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(std::env::current_dir()?.join(path))
+    }
+}
+
+fn verify_case(case: &ToolCase, output: &str, workspace: &std::path::Path) -> Result<()> {
+    match case.check {
+        ToolCheck::OutputContains(expected) => {
+            if output.contains(expected) {
+                Ok(())
+            } else {
+                Err(anyhow!("output did not contain {:?}", expected))
+            }
+        }
+        ToolCheck::OutputContainsAll(expected_values) => {
+            let missing: Vec<&str> = expected_values
+                .iter()
+                .copied()
+                .filter(|expected| !output.contains(expected))
+                .collect();
+            if missing.is_empty() {
+                Ok(())
+            } else {
+                Err(anyhow!("output missing {:?}", missing))
+            }
+        }
+        ToolCheck::OutputContainsWorkspacePath => {
+            let expected = workspace.display().to_string();
+            if output.contains(&expected) {
+                Ok(())
+            } else {
+                Err(anyhow!(
+                    "output did not contain workspace path {}",
+                    expected
+                ))
+            }
+        }
+        ToolCheck::WorkspaceFileEquals { path, content } => {
+            let actual = std::fs::read_to_string(workspace.join(path))
+                .map_err(|err| anyhow!("failed to read {}: {}", path, err))?;
+            if actual == content {
+                Ok(())
+            } else {
+                Err(anyhow!(
+                    "{} content mismatch: expected {:?}, got {:?}",
+                    path,
+                    content,
+                    actual
+                ))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn absolutize_path_preserves_absolute_paths() {
+        let path = PathBuf::from("/tmp/jcode-harness-test");
+
+        assert_eq!(absolutize_path(path.clone()).unwrap(), path);
+    }
+
+    #[test]
+    fn absolutize_path_resolves_relative_paths_from_current_dir() {
+        let path = PathBuf::from(".context/harness-test");
+        let expected = std::env::current_dir().unwrap().join(&path);
+
+        assert_eq!(absolutize_path(path).unwrap(), expected);
+    }
 }

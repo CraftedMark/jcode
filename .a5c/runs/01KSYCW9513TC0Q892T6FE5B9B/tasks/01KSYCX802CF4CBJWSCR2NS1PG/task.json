@@ -1,0 +1,115 @@
+{
+  "agent": {
+    "name": "ios-native-expert",
+    "outputSchema": {
+      "properties": {
+        "filesChanged": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "risks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "success",
+        "filesChanged",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "prompt": {
+      "context": {
+        "audit": {
+          "alreadyDone": [
+            "Rust mobile core already owns pairing validation, chat send/streaming, tool-call state, session state, model change confirmation, reconnect intent/effects, reload status handling, approval state/effects, notification event surfacing, semantic tree scenarios, replay traces, and simulator automation.",
+            "Swift iOS host already links the Rust FFI bridge, dispatches many server events into the Rust reducer, includes a Settings diagnostics section, notification authorization/status plumbing, QR/pairing repair, sessions, models, and gateway health checks.",
+            "The PRD open gaps are stale for M1/M2/M4 in several places; the real local gap is not first implementation but reconciling docs with verified behavior and tightening diagnostics/reconnect state so future work targets APNs/Live Activities/physical-device beta accurately."
+          ],
+          "files": [
+            "crates/jcode-mobile-core/src/lib.rs",
+            "crates/jcode-mobile-core/src/lib_tests.rs",
+            "ios/Sources/JCodeMobile/AppModel.swift",
+            "ios/Sources/JCodeMobile/ContentView.swift",
+            "docs/JCODE_MOBILE_PRD.md",
+            ".context/jcode-mobile-prd-handoff.md"
+          ],
+          "selectedSlice": "Tighten the locally-verifiable diagnostics/reconnect slice and update the PRD/handoff so M1 shared-core parity is no longer treated as open. Specifically: add focused tests for server event parity where missing, ensure diagnostics do not overclaim APNs/physical-device work, update PRD milestones/current-state/next-slice, and record handoff evidence under .context.",
+          "verificationCommands": [
+            "cargo test -p jcode-mobile-core",
+            "cargo test -p jcode-mobile-sim",
+            "cargo check -p jcode-mobile-core -p jcode-mobile-sim",
+            "swift run --package-path ios JCodeKitTests",
+            "git diff --check"
+          ]
+        },
+        "prdPath": "docs/JCODE_MOBILE_PRD.md",
+        "targetSlice": "Finish the next bounded JCode Mobile PRD work by reconciling stale PRD state against the current Rust mobile core, simulator, Swift bridge, diagnostics, and implement the highest-leverage remaining gap that can be verified locally without overclaiming APNs or physical-device acceptance."
+      },
+      "instructions": [
+        "Make surgical code changes only in files needed for the selected slice.",
+        "Add focused Rust and/or Swift tests where the slice changes shared behavior.",
+        "Keep product behavior in jcode-mobile-core; Swift should host platform effects and rendering.",
+        "Do not modify unrelated local user changes.",
+        "Return files changed, behavior implemented, and any residual risks."
+      ],
+      "outputFormat": "JSON",
+      "role": "principal Rust and Swift mobile engineer",
+      "task": "Implement the selected PRD slice directly in the repository."
+    }
+  },
+  "io": {
+    "inputJsonPath": "tasks/01KSYCX802CF4CBJWSCR2NS1PG/input.json",
+    "outputJsonPath": "tasks/01KSYCX802CF4CBJWSCR2NS1PG/output.json"
+  },
+  "kind": "agent",
+  "labels": [
+    "implementation",
+    "jcode",
+    "mobile"
+  ],
+  "title": "Implement selected JCode Mobile PRD slice",
+  "schemaVersion": "2026.01.tasks-v1",
+  "effectId": "01KSYCX802CF4CBJWSCR2NS1PG",
+  "taskId": "jcode-mobile-prd-implement",
+  "invocationKey": "local/jcode-mobile-prd-finish:S000002:jcode-mobile-prd-implement",
+  "stepId": "S000002",
+  "inputs": {
+    "audit": {
+      "alreadyDone": [
+        "Rust mobile core already owns pairing validation, chat send/streaming, tool-call state, session state, model change confirmation, reconnect intent/effects, reload status handling, approval state/effects, notification event surfacing, semantic tree scenarios, replay traces, and simulator automation.",
+        "Swift iOS host already links the Rust FFI bridge, dispatches many server events into the Rust reducer, includes a Settings diagnostics section, notification authorization/status plumbing, QR/pairing repair, sessions, models, and gateway health checks.",
+        "The PRD open gaps are stale for M1/M2/M4 in several places; the real local gap is not first implementation but reconciling docs with verified behavior and tightening diagnostics/reconnect state so future work targets APNs/Live Activities/physical-device beta accurately."
+      ],
+      "files": [
+        "crates/jcode-mobile-core/src/lib.rs",
+        "crates/jcode-mobile-core/src/lib_tests.rs",
+        "ios/Sources/JCodeMobile/AppModel.swift",
+        "ios/Sources/JCodeMobile/ContentView.swift",
+        "docs/JCODE_MOBILE_PRD.md",
+        ".context/jcode-mobile-prd-handoff.md"
+      ],
+      "selectedSlice": "Tighten the locally-verifiable diagnostics/reconnect slice and update the PRD/handoff so M1 shared-core parity is no longer treated as open. Specifically: add focused tests for server event parity where missing, ensure diagnostics do not overclaim APNs/physical-device work, update PRD milestones/current-state/next-slice, and record handoff evidence under .context.",
+      "verificationCommands": [
+        "cargo test -p jcode-mobile-core",
+        "cargo test -p jcode-mobile-sim",
+        "cargo check -p jcode-mobile-core -p jcode-mobile-sim",
+        "swift run --package-path ios JCodeKitTests",
+        "git diff --check"
+      ]
+    },
+    "prdPath": "docs/JCODE_MOBILE_PRD.md",
+    "targetSlice": "Finish the next bounded JCode Mobile PRD work by reconciling stale PRD state against the current Rust mobile core, simulator, Swift bridge, diagnostics, and implement the highest-leverage remaining gap that can be verified locally without overclaiming APNs or physical-device acceptance."
+  }
+}
