@@ -107,8 +107,7 @@ fn global_hooks_path() -> &'static Path {
         if let Ok(p) = std::env::var("JCODE_HOOKS_FILE") {
             return PathBuf::from(p);
         }
-        crate::storage::user_home_path("hooks.json")
-            .unwrap_or_else(|_| PathBuf::from(""))
+        crate::storage::user_home_path("hooks.json").unwrap_or_else(|_| PathBuf::from(""))
     })
 }
 
@@ -205,9 +204,7 @@ pub async fn apply_pre_tool_use(
             continue;
         }
         for hook in &group.hooks {
-            if let Some(updated) =
-                run_one(hook, tool_name, &current_input, working_dir).await
-            {
+            if let Some(updated) = run_one(hook, tool_name, &current_input, working_dir).await {
                 current_input = updated;
             }
         }
@@ -251,10 +248,7 @@ async fn run_one(
     let mut child = match command.spawn() {
         Ok(c) => c,
         Err(e) => {
-            crate::logging::warn(&format!(
-                "Hook spawn failed (cmd={}): {}",
-                cmd, e
-            ));
+            crate::logging::warn(&format!("Hook spawn failed (cmd={}): {}", cmd, e));
             return None;
         }
     };
@@ -302,12 +296,11 @@ async fn run_one(
 
     match serde_json::from_str::<HookOutput>(&stdout) {
         Ok(parsed) => {
-            let updated = parsed.hook_specific_output.and_then(|hso| hso.updated_input);
+            let updated = parsed
+                .hook_specific_output
+                .and_then(|hso| hso.updated_input);
             if updated.is_some() {
-                crate::logging::info(&format!(
-                    "Hook rewrote tool input (cmd={})",
-                    cmd
-                ));
+                crate::logging::info(&format!("Hook rewrote tool input (cmd={})", cmd));
             }
             updated
         }

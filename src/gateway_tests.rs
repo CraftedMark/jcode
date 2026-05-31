@@ -120,3 +120,30 @@ fn test_extract_ws_auth_rejects_conflicting_sources() {
         .expect("request");
     assert!(extract_ws_auth(&request).is_err());
 }
+
+#[test]
+fn test_mobile_knowledge_path_validation_rejects_escape() {
+    let root = std::env::current_dir().expect("cwd");
+    assert!(safe_relative_path("../CLAUDE.md").is_err());
+    assert!(safe_relative_path("/tmp/CLAUDE.md").is_ok());
+    assert!(validate_knowledge_path(KnowledgeScope::Identity, &root, "../CLAUDE.md").is_err());
+}
+
+#[test]
+fn test_mobile_knowledge_identity_list_includes_claude_file() {
+    let root = std::env::current_dir().expect("cwd");
+    let paths = identity_paths(&root);
+    assert!(
+        paths
+            .iter()
+            .any(|path| path == std::path::Path::new("CLAUDE.md")),
+        "CLAUDE.md should be editable from mobile when present"
+    );
+}
+
+#[test]
+fn test_mobile_knowledge_write_rejects_secret_like_content() {
+    assert!(reject_secret_like_content("normal operator notes").is_ok());
+    assert!(reject_secret_like_content("OPENAI_API_KEY=sk-test").is_err());
+    assert!(reject_secret_like_content("refresh_token = abc").is_err());
+}
