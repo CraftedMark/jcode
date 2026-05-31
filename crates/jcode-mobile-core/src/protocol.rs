@@ -299,6 +299,15 @@ pub enum MobileServerEvent {
     UpstreamProvider {
         provider: String,
     },
+    ConnectionType {
+        connection: String,
+    },
+    ConnectionPhase {
+        phase: String,
+    },
+    StatusDetail {
+        detail: String,
+    },
     Done {
         id: u64,
     },
@@ -344,6 +353,14 @@ pub enum MobileServerEvent {
         provider_name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+    },
+    AvailableModelsUpdated {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_model: Option<String>,
+        #[serde(default)]
+        available_models: Vec<String>,
     },
     Notification(MobileNotification),
     SwarmStatus {
@@ -632,6 +649,55 @@ mod tests {
         assert_eq!(id, 78);
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].risk, "high");
+    }
+
+    #[test]
+    fn mobile_connection_diagnostic_events_decode() {
+        let connection_type: Result<MobileServerEvent, _> =
+            serde_json::from_value(json!({"type":"connection_type","connection":"websocket"}));
+        assert_eq!(
+            connection_type.expect("connection_type should decode"),
+            MobileServerEvent::ConnectionType {
+                connection: "websocket".to_string()
+            }
+        );
+
+        let connection_phase: Result<MobileServerEvent, _> =
+            serde_json::from_value(json!({"type":"connection_phase","phase":"connecting"}));
+        assert_eq!(
+            connection_phase.expect("connection_phase should decode"),
+            MobileServerEvent::ConnectionPhase {
+                phase: "connecting".to_string()
+            }
+        );
+
+        let status_detail: Result<MobileServerEvent, _> =
+            serde_json::from_value(json!({"type":"status_detail","detail":"using persistent websocket"}));
+        assert_eq!(
+            status_detail.expect("status_detail should decode"),
+            MobileServerEvent::StatusDetail {
+                detail: "using persistent websocket".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn mobile_available_models_updated_event_decodes() {
+        let event: Result<MobileServerEvent, _> = serde_json::from_value(json!({
+            "type":"available_models_updated",
+            "provider_name":"openai",
+            "provider_model":"gpt-5",
+            "available_models":["gpt-5","claude-sonnet-4"],
+            "available_model_routes":[{"ignored":"by-mobile"}]
+        }));
+        assert_eq!(
+            event.expect("available_models_updated should decode"),
+            MobileServerEvent::AvailableModelsUpdated {
+                provider_name: Some("openai".to_string()),
+                provider_model: Some("gpt-5".to_string()),
+                available_models: vec!["gpt-5".to_string(), "claude-sonnet-4".to_string()]
+            }
+        );
     }
 
     #[test]

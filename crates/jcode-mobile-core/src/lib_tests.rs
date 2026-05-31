@@ -431,6 +431,74 @@ fn model_change_waits_for_server_confirmation() {
 }
 
 #[test]
+fn available_models_updated_refreshes_core_model_state() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    store.dispatch(SimulatorAction::SetModel {
+        model: "claude-sonnet-4".to_string(),
+    });
+    store.dispatch(SimulatorAction::ApplyServerEvent {
+        event: protocol::MobileServerEvent::AvailableModelsUpdated {
+            provider_name: Some("anthropic".to_string()),
+            provider_model: Some("claude-sonnet-4".to_string()),
+            available_models: vec![
+                "claude-sonnet-4".to_string(),
+                "gpt-5".to_string(),
+                "local-qwen".to_string(),
+            ],
+        },
+    });
+
+    assert_eq!(store.state().provider_name.as_deref(), Some("anthropic"));
+    assert_eq!(store.state().model_name.as_deref(), Some("claude-sonnet-4"));
+    assert_eq!(store.state().pending_model_name, None);
+    assert_eq!(
+        store.state().available_models,
+        vec![
+            "claude-sonnet-4".to_string(),
+            "gpt-5".to_string(),
+            "local-qwen".to_string()
+        ]
+    );
+}
+
+#[test]
+fn connection_diagnostic_events_update_visible_core_state() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    store.dispatch(SimulatorAction::ApplyServerEvent {
+        event: protocol::MobileServerEvent::ConnectionType {
+            connection: "websocket".to_string(),
+        },
+    });
+    store.dispatch(SimulatorAction::ApplyServerEvent {
+        event: protocol::MobileServerEvent::ConnectionPhase {
+            phase: "waiting_for_response".to_string(),
+        },
+    });
+    store.dispatch(SimulatorAction::ApplyServerEvent {
+        event: protocol::MobileServerEvent::StatusDetail {
+            detail: "provider accepted websocket stream".to_string(),
+        },
+    });
+
+    assert_eq!(
+        store.state().connection_transport.as_deref(),
+        Some("websocket")
+    );
+    assert_eq!(
+        store.state().connection_phase.as_deref(),
+        Some("waiting_for_response")
+    );
+    assert_eq!(
+        store.state().status_detail.as_deref(),
+        Some("provider accepted websocket stream")
+    );
+    assert_eq!(
+        store.state().status_message.as_deref(),
+        Some("provider accepted websocket stream")
+    );
+}
+
+#[test]
 fn reconnect_effect_preserves_active_session() {
     let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
     let report = store.dispatch(SimulatorAction::Disconnected {

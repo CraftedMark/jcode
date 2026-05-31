@@ -134,6 +134,14 @@ pub struct SimulatorState {
     pub sessions: Vec<String>,
     pub available_models: Vec<String>,
     pub model_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_transport: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_phase: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_detail: Option<String>,
     pub is_processing: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_approvals: Vec<ApprovalRequest>,
@@ -172,6 +180,10 @@ impl SimulatorState {
                 sessions: Vec::new(),
                 available_models: Vec::new(),
                 model_name: None,
+                provider_name: None,
+                connection_transport: None,
+                connection_phase: None,
+                status_detail: None,
                 is_processing: false,
                 pending_approvals: Vec::new(),
                 active_tool_id: None,
@@ -228,6 +240,10 @@ impl SimulatorState {
                     sessions: vec!["session_sim_1".to_string(), "session_sim_2".to_string()],
                     available_models: vec!["gpt-5".to_string(), "claude-sonnet-4".to_string()],
                     model_name: Some("gpt-5".to_string()),
+                    provider_name: Some("openai".to_string()),
+                    connection_transport: Some("simulator".to_string()),
+                    connection_phase: Some("connected".to_string()),
+                    status_detail: Some("Connected to simulated jcode server.".to_string()),
                     is_processing: false,
                     pending_approvals: Vec::new(),
                     active_tool_id: None,
@@ -928,6 +944,7 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
             should_reconnect,
         } => {
             state.connection_state = ConnectionState::Disconnected;
+            state.connection_phase = Some("disconnected".to_string());
             state.is_processing = false;
             state.active_tool_id = None;
             state.pending_model_name = None;
@@ -940,6 +957,7 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
                     let attempt = state.reconnect_attempt;
                     state.reconnect_attempt = state.reconnect_attempt.saturating_add(1);
                     state.connection_state = ConnectionState::Connecting;
+                    state.connection_phase = Some("reconnecting".to_string());
                     state.status_message = Some(format!(
                         "Reconnecting to {}:{} (attempt {})...",
                         server.host,
@@ -1285,7 +1303,7 @@ fn apply_server_event(state: &mut SimulatorState, event: protocol::MobileServerE
         }
         protocol::MobileServerEvent::ModelChanged {
             model,
-            provider_name: _,
+            provider_name,
             error,
             ..
         } => {
@@ -1293,6 +1311,9 @@ fn apply_server_event(state: &mut SimulatorState, event: protocol::MobileServerE
             if let Some(error) = error {
                 state.error_message = Some(error);
             } else {
+                if let Some(provider_name) = provider_name {
+                    state.provider_name = Some(provider_name);
+                }
                 if !state
                     .available_models
                     .iter()
@@ -1307,9 +1328,35 @@ fn apply_server_event(state: &mut SimulatorState, event: protocol::MobileServerE
         }
         protocol::MobileServerEvent::Reloading { .. } => {
             state.connection_state = ConnectionState::Connecting;
+            state.connection_phase = Some("server_reloading".to_string());
             state.status_message = Some("Server reloading. Reconnecting...".to_string());
             state.is_processing = false;
             clear_active_turn_tracking(state);
+        }
+        protocol::MobileServerEvent::ConnectionType { connection } => {
+            state.connection_transport = Some(connection);
+        }
+        protocol::MobileServerEvent::ConnectionPhase { phase } => {
+            state.connection_phase = Some(phase.clone());
+            state.status_message = Some(format!("Connection: {phase}"));
+        }
+        protocol::MobileServerEvent::StatusDetail { detail } => {
+            state.status_detail = Some(detail.clone());
+            state.status_message = Some(detail);
+        }
+        protocol::MobileServerEvent::AvailableModelsUpdated {
+            provider_name,
+            provider_model,
+            available_models,
+        } => {
+            if let Some(provider_name) = provider_name {
+                state.provider_name = Some(provider_name);
+            }
+            if let Some(provider_model) = provider_model {
+                state.model_name = Some(provider_model);
+            }
+            state.available_models = available_models;
+            state.pending_model_name = None;
         }
         protocol::MobileServerEvent::ReloadProgress {
             message, success, ..
@@ -1418,7 +1465,9 @@ fn apply_history_payload(state: &mut SimulatorState, payload: protocol::HistoryP
         state.sessions.insert(0, payload.session_id.clone());
     }
     state.available_models = payload.available_models;
+    state.provider_name = payload.provider_name;
     state.model_name = payload.provider_model;
+    state.connection_transport = payload.connection_type;
     state.reconnect_attempt = 0;
     state.pending_session_id = None;
     state.pending_model_name = None;

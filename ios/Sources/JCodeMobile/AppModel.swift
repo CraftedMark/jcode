@@ -91,11 +91,14 @@ final class AppModel: ObservableObject {
     @Published var sessions: [String] = []
     @Published var serverName: String = ""
     @Published var serverVersion: String = ""
+    @Published var providerName: String = ""
     @Published var modelName: String = ""
     @Published var gatewayHealthStatus: String = "Not checked"
     @Published var gatewayHealthVersion: String = ""
     @Published var gatewayHealthCheckedAt: Date?
     @Published var connectionTransport: String = "Unknown"
+    @Published var connectionPhase: String = "Unknown"
+    @Published var statusDetail: String = ""
     @Published var lastDisconnectReason: String = "None"
     @Published var rustCoreReducerStatus: String = "Not checked"
     @Published var pendingApprovals: [MobileCoreApproval] = []
@@ -378,8 +381,11 @@ final class AppModel: ObservableObject {
         }
         serverName = credential.serverName
         serverVersion = credential.serverVersion
+        providerName = ""
         modelName = ""
         connectionTransport = "WebSocket"
+        connectionPhase = "Connecting"
+        statusDetail = ""
 
         let newClient = JCodeClient(host: credential.host, port: credential.port, authToken: credential.authToken)
         let delegate = ClientDelegate(model: self, generation: generation)
@@ -596,8 +602,10 @@ final class AppModel: ObservableObject {
         sessions = info.allSessions
         serverName = info.serverName ?? "jcode"
         serverVersion = info.serverVersion ?? ""
+        providerName = info.providerName ?? ""
         modelName = info.providerModel ?? ""
         connectionTransport = info.connectionType ?? "WebSocket"
+        connectionPhase = "Connected"
         availableModels = info.availableModels
     }
 
@@ -761,6 +769,18 @@ final class AppModel: ObservableObject {
     private func applyCoreSnapshot(_ snapshot: MobileCoreSnapshot) {
         rustCoreReducerStatus = snapshot.summary
         pendingApprovals = snapshot.state.pendingApprovals
+        if let provider = snapshot.state.providerName {
+            providerName = provider
+        }
+        if let transport = snapshot.state.connectionTransport {
+            connectionTransport = transport
+        }
+        if let phase = snapshot.state.connectionPhase {
+            connectionPhase = phase
+        }
+        if let detail = snapshot.state.statusDetail {
+            statusDetail = detail
+        }
     }
 
     private func dispatchCoreConnectedIntent() {
@@ -774,7 +794,7 @@ final class AppModel: ObservableObject {
         reconnecting = false
         reconnectAttempt = 0
         applyConnectedServerInfo(info)
-        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"history","session_id":\#(info.sessionId.jsonEscapedForMobileCore),"messages":[],"server_name":\#((info.serverName ?? "jcode").jsonEscapedForMobileCore),"server_version":\#((info.serverVersion ?? "").jsonEscapedForMobileCore),"provider_model":\#((info.providerModel ?? "").jsonEscapedForMobileCore),"available_models":\#(jsonArray(info.availableModels)),"all_sessions":\#(jsonArray(info.allSessions))}}"#)
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"history","session_id":\#(info.sessionId.jsonEscapedForMobileCore),"messages":[],"server_name":\#((info.serverName ?? "jcode").jsonEscapedForMobileCore),"server_version":\#((info.serverVersion ?? "").jsonEscapedForMobileCore),"provider_name":\#((info.providerName ?? "").jsonEscapedForMobileCore),"provider_model":\#((info.providerModel ?? "").jsonEscapedForMobileCore),"connection_type":\#((info.connectionType ?? "WebSocket").jsonEscapedForMobileCore),"available_models":\#(jsonArray(info.availableModels)),"all_sessions":\#(jsonArray(info.allSessions))}}"#)
     }
 
     fileprivate func onDisconnected(error: String?) {
@@ -969,10 +989,52 @@ final class AppModel: ObservableObject {
         dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"error","id":0,"message":\#(message.jsonEscapedForMobileCore)}}}"#)
     }
 
-    fileprivate func onModelChanged(model: String, provider _: String?) {
+    fileprivate func onModelChanged(model: String, provider: String?) {
+        if let provider {
+            providerName = provider
+        }
         modelName = model
         statusMessage = "Model: \(model)"
-        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"model_changed","id":0,"model":\#(model.jsonEscapedForMobileCore)}}}"#)
+        let providerField = provider.map { #","provider_name":\#($0.jsonEscapedForMobileCore)"# } ?? ""
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"model_changed","id":0,"model":\#(model.jsonEscapedForMobileCore)\#(providerField)}}"#)
+    }
+
+    fileprivate func onAvailableModelsUpdated(provider: String?, model: String?, models: [String]) {
+        if let provider {
+            providerName = provider
+        }
+        if let model {
+            modelName = model
+        }
+        availableModels = models
+
+        var fields = [
+            #""type":"available_models_updated""#,
+            #""available_models":\#(jsonArray(models))"#,
+        ]
+        if let provider {
+            fields.append(#""provider_name":\#(provider.jsonEscapedForMobileCore)"#)
+        }
+        if let model {
+            fields.append(#""provider_model":\#(model.jsonEscapedForMobileCore)"#)
+        }
+        dispatchCore(action: #"{"type":"apply_server_event","event":{\#(fields.joined(separator: ","))}}"#)
+    }
+
+    fileprivate func onConnectionType(_ connection: String) {
+        connectionTransport = connection
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"connection_type","connection":\#(connection.jsonEscapedForMobileCore)}}}"#)
+    }
+
+    fileprivate func onConnectionPhase(_ phase: String) {
+        connectionPhase = phase
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"connection_phase","phase":\#(phase.jsonEscapedForMobileCore)}}}"#)
+    }
+
+    fileprivate func onStatusDetail(_ detail: String) {
+        statusDetail = detail
+        statusMessage = detail
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"status_detail","detail":\#(detail.jsonEscapedForMobileCore)}}}"#)
     }
 
     fileprivate func onHistory(_ history: [HistoryMessage]) {
@@ -980,7 +1042,7 @@ final class AppModel: ObservableObject {
         let messageJson = history.map { item in
             #"{"role":\#(item.role.jsonEscapedForMobileCore),"content":\#(item.content.jsonEscapedForMobileCore)}"#
         }.joined(separator: ",")
-        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"history","session_id":\#(activeSessionId.jsonEscapedForMobileCore),"messages":[\#(messageJson)],"available_models":\#(jsonArray(availableModels)),"all_sessions":\#(jsonArray(sessions))}}"#)
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"history","session_id":\#(activeSessionId.jsonEscapedForMobileCore),"messages":[\#(messageJson)],"provider_name":\#(providerName.jsonEscapedForMobileCore),"provider_model":\#(modelName.jsonEscapedForMobileCore),"connection_type":\#(connectionTransport.jsonEscapedForMobileCore),"available_models":\#(jsonArray(availableModels)),"all_sessions":\#(jsonArray(sessions))}}"#)
     }
 
     fileprivate func onApprovals(_ approvals: [ApprovalRequestPayload]) {
@@ -1074,6 +1136,26 @@ private final class ClientDelegate: JCodeClientDelegate {
     func clientDidChangeModel(model: String, provider: String?) {
         guard guardCurrent() else { return }
         self.model.onModelChanged(model: model, provider: provider)
+    }
+
+    func clientDidUpdateAvailableModels(provider: String?, model: String?, models: [String]) {
+        guard guardCurrent() else { return }
+        self.model.onAvailableModelsUpdated(provider: provider, model: model, models: models)
+    }
+
+    func clientDidUpdateConnectionType(_ connection: String) {
+        guard guardCurrent() else { return }
+        model.onConnectionType(connection)
+    }
+
+    func clientDidUpdateConnectionPhase(_ phase: String) {
+        guard guardCurrent() else { return }
+        model.onConnectionPhase(phase)
+    }
+
+    func clientDidUpdateStatusDetail(_ detail: String) {
+        guard guardCurrent() else { return }
+        model.onStatusDetail(detail)
     }
 
     func clientDidReceiveHistory(messages: [HistoryMessage]) {

@@ -143,6 +143,9 @@ public enum ServerEvent: Decodable, Sendable {
     case toolDone(id: String, name: String, output: String, error: String?)
     case tokenUsage(input: UInt64, output: UInt64, cacheRead: UInt64?, cacheWrite: UInt64?)
     case upstreamProvider(provider: String)
+    case connectionType(connection: String)
+    case connectionPhase(phase: String)
+    case statusDetail(detail: String)
     case done(id: UInt64)
     case error(id: UInt64, message: String)
     case pong(id: UInt64)
@@ -153,6 +156,7 @@ public enum ServerEvent: Decodable, Sendable {
     case reloading(newSocket: String?)
     case reloadProgress(step: String, message: String, success: Bool?, output: String?)
     case modelChanged(id: UInt64, model: String, providerName: String?, error: String?)
+    case availableModelsUpdated(providerName: String?, providerModel: String?, availableModels: [String])
     case notification(ServerNotification)
     case swarmStatus(members: [SwarmMemberStatus])
     case mcpStatus(servers: [String])
@@ -218,6 +222,18 @@ public enum ServerEvent: Decodable, Sendable {
             let provider = try container.decode(String.self, forKey: .key("provider"))
             self = .upstreamProvider(provider: provider)
 
+        case "connection_type":
+            let connection = try container.decode(String.self, forKey: .key("connection"))
+            self = .connectionType(connection: connection)
+
+        case "connection_phase":
+            let phase = try container.decode(String.self, forKey: .key("phase"))
+            self = .connectionPhase(phase: phase)
+
+        case "status_detail":
+            let detail = try container.decode(String.self, forKey: .key("detail"))
+            self = .statusDetail(detail: detail)
+
         case "done":
             let id = try container.decode(UInt64.self, forKey: .key("id"))
             self = .done(id: id)
@@ -269,6 +285,12 @@ public enum ServerEvent: Decodable, Sendable {
             let providerName = try container.decodeIfPresent(String.self, forKey: .key("provider_name"))
             let error = try container.decodeIfPresent(String.self, forKey: .key("error"))
             self = .modelChanged(id: id, model: model, providerName: providerName, error: error)
+
+        case "available_models_updated":
+            let providerName = try container.decodeIfPresent(String.self, forKey: .key("provider_name"))
+            let providerModel = try container.decodeIfPresent(String.self, forKey: .key("provider_model"))
+            let availableModels = try container.decodeIfPresent([String].self, forKey: .key("available_models")) ?? []
+            self = .availableModelsUpdated(providerName: providerName, providerModel: providerModel, availableModels: availableModels)
 
         case "notification":
             let notif = try ServerNotification(from: decoder)
