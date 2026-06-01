@@ -86,6 +86,7 @@ final class AppModel: ObservableObject {
     @Published var draftMessage: String = ""
     @Published var activeSessionId: String = ""
     @Published var sessions: [String] = []
+    @Published var sessionSummaries: [SessionSummary] = []
     @Published var serverName: String = ""
     @Published var serverVersion: String = ""
     @Published var modelName: String = ""
@@ -503,6 +504,7 @@ final class AppModel: ObservableObject {
         activeSessionId = info.sessionId
         rememberSessionId(info.sessionId)
         sessions = info.allSessions
+        sessionSummaries = info.sessionSummaries
         serverName = info.serverName ?? "jcode"
         serverVersion = info.serverVersion ?? ""
         modelName = info.providerModel ?? ""
@@ -845,6 +847,29 @@ private final class ClientDelegate: JCodeClientDelegate {
     func clientDidChangeModel(model: String, provider: String?) {
         guard guardCurrent() else { return }
         self.model.onModelChanged(model: model, provider: provider)
+    }
+
+    func clientDidRenameSession(sessionId: String, title: String?, displayTitle: String) {
+        guard guardCurrent() else { return }
+        model.sessionSummaries = model.sessionSummaries.map { summary in
+            guard summary.sessionId == sessionId else { return summary }
+            return SessionSummary(
+                sessionId: summary.sessionId,
+                displayName: summary.displayName,
+                title: title ?? displayTitle,
+                workingDir: summary.workingDir,
+                status: summary.status,
+                statusDetail: summary.statusDetail,
+                updatedAt: summary.updatedAt,
+                lastActiveAt: summary.lastActiveAt,
+                providerKey: summary.providerKey,
+                model: summary.model,
+                isActive: summary.isActive,
+                isLive: summary.isLive,
+                clientCount: summary.clientCount,
+                activity: summary.activity
+            )
+        }
     }
 
     func clientDidReceiveHistory(messages: [HistoryMessage]) {

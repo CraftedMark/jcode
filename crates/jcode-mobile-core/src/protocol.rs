@@ -399,12 +399,49 @@ pub struct HistoryPayload {
     pub available_models: Vec<String>,
     #[serde(default)]
     pub all_sessions: Vec<String>,
+    #[serde(default)]
+    pub session_summaries: Vec<MobileSessionSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_canary: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub was_interrupted: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_tokens: Option<TokenTotals>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MobileSessionSummary {
+    pub session_id: String,
+    pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_detail: Option<String>,
+    pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_active_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub is_active: bool,
+    #[serde(default)]
+    pub is_live: bool,
+    #[serde(default)]
+    pub client_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<MobileSessionActivity>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MobileSessionActivity {
+    pub is_processing: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_tool_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -574,7 +611,7 @@ mod tests {
     #[test]
     fn history_payload_decodes_server_metadata() {
         let event: Result<MobileServerEvent, _> = serde_json::from_value(
-            json!({"type":"history","session_id":"s1","server_name":"jcode","provider_model":"gpt-5","available_models":["gpt-5","claude-sonnet-4"],"all_sessions":["s1","s2"],"messages":[{"role":"assistant","content":"hi"}]}),
+            json!({"type":"history","session_id":"s1","server_name":"jcode","provider_model":"gpt-5","available_models":["gpt-5","claude-sonnet-4"],"all_sessions":["s1","s2"],"session_summaries":[{"session_id":"s1","display_name":"fox","title":"Release planning","working_dir":"/repo","status":"active","updated_at":"2026-06-01T12:00:00Z","provider_key":"openai","model":"gpt-5","is_active":true,"is_live":true,"client_count":1,"activity":{"is_processing":true,"current_tool_name":"bash"}}],"messages":[{"role":"assistant","content":"hi"}]}),
         );
         assert!(event.is_ok(), "history event should decode");
         let Ok(event) = event else {
@@ -590,6 +627,15 @@ mod tests {
         assert_eq!(payload.session_id, "s1");
         assert_eq!(payload.provider_model.as_deref(), Some("gpt-5"));
         assert_eq!(payload.messages[0].content, "hi");
+        assert_eq!(payload.session_summaries.len(), 1);
+        assert_eq!(payload.session_summaries[0].display_name, "fox");
+        assert_eq!(
+            payload.session_summaries[0]
+                .activity
+                .as_ref()
+                .and_then(|activity| activity.current_tool_name.as_deref()),
+            Some("bash")
+        );
     }
 
     #[test]

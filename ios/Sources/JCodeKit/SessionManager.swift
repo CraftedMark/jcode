@@ -9,6 +9,7 @@ public actor SessionManager {
     private let connection: JCodeConnection
     private var currentSessionId: String?
     private var allSessions: [String] = []
+    private var sessionSummaries: [SessionSummary] = []
 
     public init(connection: JCodeConnection) {
         self.connection = connection
@@ -16,6 +17,7 @@ public actor SessionManager {
 
     public var activeSessionId: String? { currentSessionId }
     public var sessions: [String] { allSessions }
+    public var summaries: [SessionSummary] { sessionSummaries }
 
     public func setActiveSession(_ sessionId: String) {
         currentSessionId = sessionId
@@ -24,6 +26,7 @@ public actor SessionManager {
     public func updateSessions(from payload: HistoryPayload) {
         currentSessionId = payload.sessionId
         allSessions = payload.allSessions
+        sessionSummaries = payload.sessionSummaries
     }
 
     public func switchSession(_ sessionId: String) async throws {
