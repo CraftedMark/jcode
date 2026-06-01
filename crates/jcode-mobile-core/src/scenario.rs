@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     ChatMessage, ConnectionState, MessageRole, PairingForm, Screen, ServerSummary, SimulatorState,
+    protocol,
 };
 
 impl SimulatorState {
@@ -19,6 +20,7 @@ impl SimulatorState {
                 draft_message: String::new(),
                 active_session_id: None,
                 sessions: Vec::new(),
+                session_summaries: Vec::new(),
                 available_models: Vec::new(),
                 model_name: None,
                 is_processing: false,
@@ -68,6 +70,20 @@ impl SimulatorState {
                     draft_message: String::new(),
                     active_session_id: Some("session_sim_1".to_string()),
                     sessions: vec!["session_sim_1".to_string(), "session_sim_2".to_string()],
+                    session_summaries: vec![
+                        simulated_session_summary(
+                            "session_sim_1",
+                            "fox",
+                            Some("Simulator chat"),
+                            true,
+                        ),
+                        simulated_session_summary(
+                            "session_sim_2",
+                            "oak",
+                            Some("Release follow-up"),
+                            false,
+                        ),
+                    ],
                     available_models: vec!["gpt-5".to_string(), "claude-sonnet-4".to_string()],
                     model_name: Some("gpt-5".to_string()),
                     is_processing: false,
@@ -168,6 +184,30 @@ impl SimulatorState {
                 state
             }
         }
+    }
+}
+
+fn simulated_session_summary(
+    session_id: &str,
+    display_name: &str,
+    title: Option<&str>,
+    is_active: bool,
+) -> protocol::MobileSessionSummary {
+    protocol::MobileSessionSummary {
+        session_id: session_id.to_string(),
+        display_name: display_name.to_string(),
+        title: title.map(ToOwned::to_owned),
+        working_dir: Some("/repo".to_string()),
+        status: "active".to_string(),
+        status_detail: None,
+        updated_at: "2026-06-01T12:00:00Z".to_string(),
+        last_active_at: Some("2026-06-01T12:00:00Z".to_string()),
+        provider_key: Some("openai".to_string()),
+        model: Some("gpt-5".to_string()),
+        is_active,
+        is_live: true,
+        client_count: if is_active { 1 } else { 0 },
+        activity: None,
     }
 }
 

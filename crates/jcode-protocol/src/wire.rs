@@ -937,6 +937,9 @@ pub enum ServerEvent {
         /// All session IDs on the server
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         all_sessions: Vec<String>,
+        /// Rich session inventory for mobile and remote clients.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        session_summaries: Vec<SessionSummary>,
         /// Number of connected clients
         #[serde(skip_serializing_if = "Option::is_none")]
         client_count: Option<usize>,

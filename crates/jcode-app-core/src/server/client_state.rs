@@ -4,7 +4,8 @@ use crate::agent::Agent;
 use crate::bus::Bus;
 use crate::message::{ContentBlock, Role};
 use crate::protocol::{
-    HistoryMessage, ServerEvent, SessionActivitySnapshot, TokenUsageTotals, encode_event,
+    HistoryMessage, ServerEvent, SessionActivitySnapshot, SessionSummary, TokenUsageTotals,
+    encode_event,
 };
 use crate::provider::Provider;
 use crate::session::{Session, SessionStatus};
@@ -74,6 +75,93 @@ fn history_provider_name_from_session(session: &crate::session::Session) -> Opti
     Some(label)
 }
 
+async fn build_session_summaries(
+    active_session_id: &str,
+    sessions: &SessionAgents,
+    client_connections: &Arc<RwLock<HashMap<String, ClientConnectionInfo>>>,
+) -> Vec<SessionSummary> {
+    let live_session_ids = {
+        let sessions_guard = sessions.read().await;
+        let mut ids: Vec<String> = sessions_guard.keys().cloned().collect();
+        if !active_session_id.is_empty() && !ids.iter().any(|id| id == active_session_id) {
+            ids.push(active_session_id.to_string());
+        }
+        ids.sort();
+        ids.dedup();
+        ids
+    };
+
+    let connection_info = {
+        let connections = client_connections.read().await;
+        let mut info: HashMap<String, (usize, bool, Option<String>)> = HashMap::new();
+        for connection in connections.values() {
+            let entry = info
+                .entry(connection.session_id.clone())
+                .or_insert((0, false, None));
+            entry.0 += 1;
+            entry.1 |= connection.is_processing;
+            if entry.2.is_none() {
+                entry.2 = connection.current_tool_name.clone();
+            }
+        }
+        info
+    };
+
+    live_session_ids
+        .into_iter()
+        .map(|session_id| {
+            let session = Session::load_startup_stub(&session_id).ok();
+            let (client_count, is_processing, current_tool_name) = connection_info
+                .get(&session_id)
+                .cloned()
+                .unwrap_or((0, false, None));
+            let activity =
+                (is_processing || current_tool_name.is_some()).then_some(SessionActivitySnapshot {
+                    is_processing,
+                    current_tool_name,
+                });
+
+            if let Some(session) = session {
+                SessionSummary {
+                    session_id: session.id.clone(),
+                    display_name: session.display_name().to_string(),
+                    title: session.display_title().map(ToOwned::to_owned),
+                    working_dir: session.working_dir.clone(),
+                    status: session.status.display().to_string(),
+                    status_detail: session.status.detail().map(ToOwned::to_owned),
+                    updated_at: session.updated_at.to_rfc3339(),
+                    last_active_at: session.last_active_at.map(|ts| ts.to_rfc3339()),
+                    provider_key: session.provider_key.clone(),
+                    model: session.model.clone(),
+                    is_active: session.id == active_session_id,
+                    is_live: true,
+                    client_count,
+                    activity,
+                }
+            } else {
+                SessionSummary {
+                    session_id: session_id.clone(),
+                    display_name: crate::id::extract_session_name(&session_id)
+                        .unwrap_or(&session_id)
+                        .to_string(),
+                    title: None,
+                    working_dir: None,
+                    status: "active".to_string(),
+                    status_detail: None,
+                    updated_at: chrono::Utc::now().to_rfc3339(),
+                    last_active_at: None,
+                    provider_key: None,
+                    model: None,
+                    is_active: session_id == active_session_id,
+                    is_live: true,
+                    client_count,
+                    activity,
+                }
+            }
+        })
+        .collect()
+}
+
 pub(super) async fn handle_get_state(
     id: u64,
     client_session_id: &str,
@@ -131,6 +219,7 @@ pub(super) async fn handle_get_history(
             client_session_id,
             provider,
             sessions,
+            client_connections,
             client_count,
             writer,
             server_name,
@@ -152,6 +241,7 @@ pub(super) async fn handle_get_history(
         client_session_id,
         agent,
         sessions,
+        client_connections,
         client_count,
         writer,
         server_name,
@@ -472,6 +562,7 @@ async fn send_history_from_persisted_session(
     session_id: &str,
     provider: &Arc<dyn Provider>,
     sessions: &SessionAgents,
+    client_connections: &Arc<RwLock<HashMap<String, ClientConnectionInfo>>>,
     client_count: &Arc<RwLock<usize>>,
     writer: &Arc<Mutex<WriteHalf>>,
     server_name: &str,
@@ -505,6 +596,7 @@ async fn send_history_from_persisted_session(
         let count = *client_count.read().await;
         (all, count)
     };
+    let session_summaries = build_session_summaries(session_id, sessions, client_connections).await;
 
     let history_event = ServerEvent::History {
         id,
@@ -524,6 +616,7 @@ async fn send_history_from_persisted_session(
         total_tokens: optional_total_tokens(token_usage_totals),
         token_usage_totals: optional_token_usage_totals(token_usage_totals),
         all_sessions,
+        session_summaries,
         client_count: Some(current_client_count),
         is_canary: Some(session.is_canary),
         server_version: Some(jcode_build_meta::VERSION.to_string()),
@@ -558,6 +651,7 @@ pub(super) async fn send_history(
     session_id: &str,
     agent: &Arc<Mutex<Agent>>,
     sessions: &SessionAgents,
+    client_connections: &Arc<RwLock<HashMap<String, ClientConnectionInfo>>>,
     client_count: &Arc<RwLock<usize>>,
     writer: &Arc<Mutex<WriteHalf>>,
     server_name: &str,
@@ -722,6 +816,7 @@ pub(super) async fn send_history(
         ));
         (all, count)
     };
+    let session_summaries = build_session_summaries(session_id, sessions, client_connections).await;
 
     let history_event = ServerEvent::History {
         id,
@@ -740,6 +835,7 @@ pub(super) async fn send_history(
         total_tokens: optional_total_tokens(token_usage_totals),
         token_usage_totals: optional_token_usage_totals(token_usage_totals),
         all_sessions,
+        session_summaries,
         client_count: Some(current_client_count),
         is_canary: Some(is_canary),
         server_version: Some(jcode_build_meta::VERSION.to_string()),

@@ -946,6 +946,66 @@ struct SettingsSheet: View {
                     .foregroundStyle(JC.Colors.textTertiary)
                     .frame(maxWidth: .infinity)
                     .glassCard()
+            } else if !model.sessionSummaries.isEmpty {
+                VStack(spacing: JC.Spacing.xs) {
+                    ForEach(model.sessionSummaries, id: \.sessionId) { session in
+                        Button {
+                            Task { await model.switchToSession(session.sessionId) }
+                        } label: {
+                            HStack(spacing: JC.Spacing.sm) {
+                                Image(systemName: session.activity?.isProcessing == true ? "bolt.horizontal.circle" : "terminal")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(session.isActive ? JC.Colors.accent : JC.Colors.textTertiary)
+                                    .frame(width: 20)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(session.title ?? session.displayName)
+                                        .font(JC.Fonts.callout)
+                                        .foregroundStyle(JC.Colors.textPrimary)
+                                        .lineLimit(1)
+                                    HStack(spacing: 6) {
+                                        Text(session.displayName)
+                                        if let model = session.model, !model.isEmpty {
+                                            Text(model)
+                                        }
+                                        if session.clientCount > 1 {
+                                            Text("\(session.clientCount) clients")
+                                        }
+                                    }
+                                    .font(JC.Fonts.caption)
+                                    .foregroundStyle(JC.Colors.textTertiary)
+                                    .lineLimit(1)
+                                }
+
+                                Spacer()
+
+                                if session.isActive {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(JC.Colors.accent)
+                                }
+                            }
+                            .padding(.horizontal, JC.Spacing.md)
+                            .padding(.vertical, JC.Spacing.sm + 2)
+                            .background(
+                                session.isActive
+                                    ? JC.Colors.accentDim
+                                    : JC.Colors.surface
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: JC.Radius.sm, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: JC.Radius.sm, style: .continuous)
+                                    .stroke(
+                                        session.isActive
+                                            ? JC.Colors.borderFocused
+                                            : JC.Colors.border,
+                                        lineWidth: 1
+                                    )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             } else {
                 VStack(spacing: JC.Spacing.xs) {
                     ForEach(model.sessions, id: \.self) { sessionId in

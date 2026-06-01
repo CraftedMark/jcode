@@ -384,6 +384,7 @@ fn test_history_event_roundtrip_preserves_side_panel_snapshot() -> Result<()> {
             cache_creation_input_tokens: 10,
         }),
         all_sessions: Vec::new(),
+        session_summaries: Vec::new(),
         client_count: None,
         is_canary: None,
         reload_recovery: None,

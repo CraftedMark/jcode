@@ -341,6 +341,7 @@ public struct HistoryPayload: Decodable, Sendable {
     public let skills: [String]
     public let totalTokens: (UInt64, UInt64)?
     public let allSessions: [String]
+    public let sessionSummaries: [SessionSummary]
     public let clientCount: Int?
     public let isCanary: Bool?
     public let serverVersion: String?
@@ -361,6 +362,7 @@ public struct HistoryPayload: Decodable, Sendable {
         case skills
         case totalTokens = "total_tokens"
         case allSessions = "all_sessions"
+        case sessionSummaries = "session_summaries"
         case clientCount = "client_count"
         case isCanary = "is_canary"
         case serverVersion = "server_version"
@@ -387,6 +389,7 @@ public struct HistoryPayload: Decodable, Sendable {
             totalTokens = nil
         }
         allSessions = try container.decodeIfPresent([String].self, forKey: .allSessions) ?? []
+        sessionSummaries = try container.decodeIfPresent([SessionSummary].self, forKey: .sessionSummaries) ?? []
         clientCount = try container.decodeIfPresent(Int.self, forKey: .clientCount)
         isCanary = try container.decodeIfPresent(Bool.self, forKey: .isCanary)
         serverVersion = try container.decodeIfPresent(String.self, forKey: .serverVersion)
@@ -395,6 +398,82 @@ public struct HistoryPayload: Decodable, Sendable {
         serverHasUpdate = try container.decodeIfPresent(Bool.self, forKey: .serverHasUpdate)
         wasInterrupted = try container.decodeIfPresent(Bool.self, forKey: .wasInterrupted)
         connectionType = try container.decodeIfPresent(String.self, forKey: .connectionType)
+    }
+}
+
+public struct SessionSummary: Decodable, Sendable, Equatable {
+    public let sessionId: String
+    public let displayName: String
+    public let title: String?
+    public let workingDir: String?
+    public let status: String
+    public let statusDetail: String?
+    public let updatedAt: String
+    public let lastActiveAt: String?
+    public let providerKey: String?
+    public let model: String?
+    public let isActive: Bool
+    public let isLive: Bool
+    public let clientCount: Int
+    public let activity: SessionActivity?
+
+    public init(
+        sessionId: String,
+        displayName: String,
+        title: String? = nil,
+        workingDir: String? = nil,
+        status: String,
+        statusDetail: String? = nil,
+        updatedAt: String,
+        lastActiveAt: String? = nil,
+        providerKey: String? = nil,
+        model: String? = nil,
+        isActive: Bool = false,
+        isLive: Bool = false,
+        clientCount: Int = 0,
+        activity: SessionActivity? = nil
+    ) {
+        self.sessionId = sessionId
+        self.displayName = displayName
+        self.title = title
+        self.workingDir = workingDir
+        self.status = status
+        self.statusDetail = statusDetail
+        self.updatedAt = updatedAt
+        self.lastActiveAt = lastActiveAt
+        self.providerKey = providerKey
+        self.model = model
+        self.isActive = isActive
+        self.isLive = isLive
+        self.clientCount = clientCount
+        self.activity = activity
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case displayName = "display_name"
+        case title
+        case workingDir = "working_dir"
+        case status
+        case statusDetail = "status_detail"
+        case updatedAt = "updated_at"
+        case lastActiveAt = "last_active_at"
+        case providerKey = "provider_key"
+        case model
+        case isActive = "is_active"
+        case isLive = "is_live"
+        case clientCount = "client_count"
+        case activity
+    }
+}
+
+public struct SessionActivity: Decodable, Sendable, Equatable {
+    public let isProcessing: Bool
+    public let currentToolName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case isProcessing = "is_processing"
+        case currentToolName = "current_tool_name"
     }
 }
 

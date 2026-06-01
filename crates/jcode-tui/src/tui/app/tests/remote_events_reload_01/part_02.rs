@@ -326,6 +326,7 @@ fn test_remote_rewind_completion_shows_undo_hint_after_history_refresh() {
             total_tokens: None,
             token_usage_totals: None,
             all_sessions: vec![],
+        session_summaries: Vec::new(),
             client_count: None,
             is_canary: None,
             reload_recovery: None,

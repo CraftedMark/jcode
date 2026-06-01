@@ -159,7 +159,8 @@ do {
     let json = """
     {"type":"history","id":1,"session_id":"fox","messages":[{"role":"user","content":"hi"}],
      "provider_name":"claude","provider_model":"claude-sonnet-4-20250514",
-     "server_version":"v0.4.1","server_name":"blazing","server_icon":"🔥","connection_type":"websocket"}
+     "server_version":"v0.4.1","server_name":"blazing","server_icon":"🔥","connection_type":"websocket",
+     "session_summaries":[{"session_id":"fox","display_name":"fox","title":"Release planning","working_dir":"/repo","status":"active","updated_at":"2026-06-01T12:00:00Z","provider_key":"openai","model":"gpt-5","is_active":true,"is_live":true,"client_count":1,"activity":{"is_processing":true,"current_tool_name":"bash"}}]}
     """
     let event = try decodeEvent(json)
     if case .history(let p) = event {
@@ -172,6 +173,9 @@ do {
         assertEqual(p.serverIcon, "🔥")
         assertEqual(p.serverVersion, "v0.4.1")
         assertEqual(p.connectionType, "websocket")
+        assertEqual(p.sessionSummaries.count, 1)
+        assertEqual(p.sessionSummaries[0].title, "Release planning")
+        assertEqual(p.sessionSummaries[0].activity?.currentToolName, "bash")
     } else { check(false, "Expected history") }
 }
 
