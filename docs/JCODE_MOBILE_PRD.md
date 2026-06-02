@@ -7,10 +7,11 @@
 ## Summary
 
 JCode Mobile is a native iOS companion app for controlling and monitoring a
-desktop `jcode` session from an iPhone. The phone is a rich touch client: it
+desktop `jcode` session from an iPhone or iPad. The device is a rich touch client: it
 pairs with a local Mac gateway, shows active agent work, streams chat and tool
-activity, lets the user send instructions, and eventually handles approvals,
-notifications, speech, camera, and ambient monitoring.
+activity, lets the user send instructions, can view or modify allowlisted
+identity and wiki files, and eventually handles approvals, notifications,
+speech, camera, and ambient monitoring.
 
 The iPhone does not run tools, shell commands, MCP servers, or local model
 inference. Those remain on the desktop `jcode` server. To avoid building the app
@@ -37,6 +38,10 @@ desktop agent runtime.
   tool progress in a native mobile layout.
 - Let the user send messages, cancel or interrupt work, switch sessions, and
   choose models when supported by the server.
+- Let the user view and safely modify allowlisted desktop identity files and
+  canonical wiki pages from mobile.
+- Use an iPad-optimized split layout when regular-width horizontal space is
+  available.
 - Surface blocking tool approvals and important task state through push
   notifications and Live Activities.
 - Keep product behavior in Rust so the simulator, tests, and Swift host share
@@ -49,6 +54,7 @@ desktop agent runtime.
 - Running shell commands, filesystem edits, git operations, MCP servers, or LLM
   inference on the phone.
 - Replacing the terminal UI or desktop app for heavy editing workflows.
+- Exposing arbitrary filesystem browsing or unrestricted wiki edits from mobile.
 - Building a public cloud service or multi-tenant hosted relay for v1.
 - Shipping a full code editor on iOS.
 - Maintaining separate Swift-only and Rust-only implementations of the same app
@@ -109,6 +115,11 @@ Already implemented:
 - Settings diagnostics view shows selected server, app version, server version,
   transport, connection phase, provider, status detail, last disconnect,
   notification status, and gateway health.
+- Authenticated mobile knowledge endpoints can list, read, and write allowlisted
+  identity files and canonical wiki pages with conflict detection, backup
+  creation, size limits, and secret-like content rejection.
+- The iOS host has a Settings knowledge editor for identity/wiki files and an
+  iPad split-view shell for regular-width devices.
 
 Open gaps:
 
@@ -119,6 +130,8 @@ Open gaps:
 - Diagnostics still need real-device and live-gateway acceptance, including
   safe log excerpts and failure classification beyond the locally replayed
   event set.
+- Knowledge editing still needs live-gateway acceptance on a paired iPhone/iPad
+  before it should be treated as beta-complete.
 
 ## Architecture
 
@@ -139,7 +152,8 @@ Open gaps:
 
 - **Desktop gateway**
   - Runs inside or beside `jcode serve`.
-  - Exposes `GET /health`, `POST /pair`, and WebSocket `/ws` on port `7643`.
+  - Exposes `GET /health`, `POST /pair`, authenticated knowledge file
+    endpoints, and WebSocket `/ws` on port `7643`.
   - Authenticates paired devices and streams session events.
 
 - **Linux mobile simulator**
@@ -321,6 +335,29 @@ Acceptance criteria:
   excerpts.
 - Sensitive tokens are never displayed.
 
+### 12. Knowledge and Identity Editing
+
+The app can view and modify a constrained set of identity files and canonical
+wiki pages on the paired desktop gateway.
+
+Acceptance criteria:
+
+- Gateway knowledge endpoints require paired-device bearer authentication.
+- Identity edits are limited to `AGENTS.md`, `CLAUDE.md`,
+  `.claude/settings.json`, `.claude/agents/*.md`, and
+  `.claude/skills/**/SKILL.md`.
+- Wiki edits are limited to markdown pages under the canonical `~/brain/wiki/`
+  root, including `index.md`, `AGENTS.md`, `log.md`, and markdown files under
+  `concepts/`, `entities/`, `answers/`, and `sources/`.
+- Writes reject path traversal, non-allowlisted paths, files over 256 KB, and
+  secret-like content markers.
+- Writes use the file hash the app loaded as a base revision and reject stale
+  saves when the file changed on disk.
+- Existing files are backed up under `~/.jcode/mobile-edit-backups/` before
+  being overwritten.
+- The iOS UI distinguishes identity and wiki scope, shows file status, prevents
+  accidental duplicate saves, and preserves reload-before-save conflict errors.
+
 ## UX Requirements
 
 - First launch should open directly to pairing if no server is configured.
@@ -331,6 +368,10 @@ Acceptance criteria:
 - Chat, tool activity, and approvals should be reachable without deep
   navigation.
 - Controls should be native, compact, and one-handed where possible.
+- iPad should use split navigation for connection/session context and keep the
+  main chat surface at a readable width.
+- The knowledge editor should use split navigation on iPad, a file list, and a
+  monospaced editor surface with visible saved/unsaved/loading state.
 - Error messages should tell the user what to check next, not expose raw
   transport errors first.
 
@@ -339,6 +380,10 @@ Acceptance criteria:
 - Tokens are stored only in Keychain on iOS.
 - Pairing codes have short TTLs and are single-use.
 - Gateway access requires bearer-token authentication after pairing.
+- Mobile knowledge edits must remain inside explicit allowlists and canonical
+  roots; arbitrary desktop filesystem writes are not allowed.
+- Mobile knowledge edits must reject obvious secret material and back up
+  overwritten files.
 - Device revocation must be supported server-side.
 - Lock-screen notifications must avoid sensitive content unless the user opts
   in.
@@ -401,7 +446,7 @@ Status: In progress.
 
 ### M3: Real Device Beta
 
-Status: Planned.
+Status: In progress.
 
 - Pair from the installed iPhone app to the desktop gateway.
 - Connect, subscribe, send chat, stream output, display tools, switch sessions,
@@ -409,6 +454,11 @@ Status: Planned.
 - Validate the diagnostics view on a physical iPhone against the live gateway,
   including connection phase, provider/model, status detail, disconnect reason,
   and gateway health.
+- Validate knowledge editing on a paired mobile device: list identity files,
+  read a wiki page, save an allowlisted test edit, confirm backup creation, and
+  confirm stale-write rejection.
+- Validate the iPad split layout and knowledge editor on an iPad simulator or
+  physical iPad.
 - Run acceptance on the physical iPhone using the user's Apple Development team.
 
 ### M4: Approvals and Notifications
@@ -444,6 +494,10 @@ The first useful beta is ready when:
 - Tool-call progress is visible and attached to the correct assistant turn.
 - The user can cancel or interrupt running work where supported.
 - The app can switch or resume sessions without stale transcript state.
+- The app can view and safely modify allowlisted identity/wiki files from a
+  paired mobile device.
+- The iPad layout is usable without the phone-only single-column navigation
+  bottleneck.
 - Diagnostics can explain the common failure cases without Xcode.
 - Rust core tests, simulator tests, Swift harness, Xcode build, physical install,
   launch, and gateway health checks all pass.
@@ -460,6 +514,7 @@ iOS verification:
 
 - `swift run --package-path ios JCodeKitTests`
 - Xcode simulator build for `JCodeMobile`
+- iPad simulator build and visual smoke pass for split-view layout
 - Physical-device build with automatic signing
 - `devicectl` install and launch on the iPhone
 
@@ -469,6 +524,9 @@ Gateway verification:
 - Verify `GET /health` over localhost and the phone-reachable host address.
 - Pair with `jcode pair`.
 - Confirm WebSocket subscription, send, stream, disconnect, and reconnect flows.
+- Confirm authenticated knowledge endpoints list/read/write allowed files,
+  reject traversal and stale hashes, create backups, and block secret-like
+  content.
 
 Regression scenarios:
 
@@ -482,6 +540,8 @@ Regression scenarios:
 - Tool failure.
 - Approval timeout.
 - App backgrounded during stream.
+- Knowledge edit conflict after desktop-side file change.
+- Wiki edit request outside the canonical root.
 
 ## Open Questions
 
@@ -496,18 +556,19 @@ Regression scenarios:
 - What server version negotiation contract should block unsupported app/server
   pairs?
 - What should the first TestFlight bundle ID and signing profile be?
+- Should wiki mobile edits allow creating new markdown pages, or only modifying
+  pages that already exist in the canonical wiki?
 
 ## Next Build Slice
 
-The next highest-leverage slice is **M2 reducer retirement plus M3 real-device
-diagnostics acceptance**. Audit remaining Swift-owned semantic state, move any
-remaining product reducers into `jcode-mobile-core`, then run a physical iPhone
-gateway loop that proves pair, connect, chat, stream, model state, reconnect,
-reload recovery, and diagnostics against a live `jcode serve`.
+The next highest-leverage slice is **M3 live mobile acceptance**. Run a paired
+iPhone/iPad gateway loop that proves pair, connect, chat, stream, model state,
+reconnect, reload recovery, diagnostics, iPad split layout, and allowlisted
+identity/wiki editing against a live `jcode serve`.
 
-Current local verification for the May 31 shared-core diagnostics slice:
+Current local verification for the May 31 mobile knowledge/iPad slice:
 
 - `cargo test -p jcode-mobile-core`
-- `cargo test -p jcode-mobile-sim`
-- `cargo check -p jcode-mobile-core -p jcode-mobile-sim`
+- `cargo test gateway_tests --lib`
 - `swift run --package-path ios JCodeKitTests`
+- Xcode simulator build for `JCodeMobile`

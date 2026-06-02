@@ -1221,8 +1221,7 @@ impl MemoryManager {
                             || line
                                 .split_once(". ")
                                 .map(|(prefix, _)| {
-                                    !prefix.is_empty()
-                                        && prefix.chars().all(|c| c.is_ascii_digit())
+                                    !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit())
                                 })
                                 .unwrap_or(false)
                     })

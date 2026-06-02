@@ -103,6 +103,14 @@ final class AppModel: ObservableObject {
     @Published var lastDisconnectReason: String = "None"
     @Published var rustCoreReducerStatus: String = "Not checked"
     @Published var pendingApprovals: [MobileCoreApproval] = []
+    @Published var knowledgeScope: KnowledgeScope = .identity
+    @Published var knowledgeFiles: [KnowledgeFileSummary] = []
+    @Published var selectedKnowledgeFile: KnowledgeFileSummary?
+    @Published var knowledgeEditorText: String = ""
+    @Published var knowledgeEditorBaseSHA256: String?
+    @Published var knowledgeStatus: String = "Not loaded"
+    @Published var knowledgeIsDirty: Bool = false
+    @Published var knowledgeIsLoading: Bool = false
 
     private let credentialStore = CredentialStore()
     private var client: JCodeClient?
@@ -252,6 +260,92 @@ final class AppModel: ObservableObject {
             gatewayHealthStatus = "Gateway unreachable. Check host, port, network, and jcode serve."
             gatewayHealthVersion = ""
             gatewayHealthCheckedAt = Date()
+        }
+    }
+
+    private func knowledgeClient() throws -> KnowledgeClient {
+        guard let selectedServer else {
+            throw KnowledgeError.serverError("Select a paired server first.")
+        }
+        return KnowledgeClient(
+            host: selectedServer.host,
+            port: selectedServer.port,
+            authToken: selectedServer.authToken
+        )
+    }
+
+    func loadKnowledgeFiles(scope: KnowledgeScope? = nil) async {
+        if let scope { knowledgeScope = scope }
+        knowledgeIsLoading = true
+        knowledgeStatus = "Loading \(knowledgeScope.displayName.lowercased())..."
+        do {
+            let client = try knowledgeClient()
+            let files = try await client.listFiles(scope: knowledgeScope)
+            knowledgeFiles = files
+            if let selected = selectedKnowledgeFile,
+               files.contains(where: { $0.id == selected.id }) {
+                selectedKnowledgeFile = files.first(where: { $0.id == selected.id })
+            } else {
+                selectedKnowledgeFile = files.first
+            }
+            knowledgeStatus = files.isEmpty ? "No editable files found." : "\(files.count) files"
+            knowledgeIsLoading = false
+            if let selectedKnowledgeFile {
+                await loadKnowledgeFile(selectedKnowledgeFile)
+            }
+        } catch {
+            knowledgeIsLoading = false
+            knowledgeStatus = "Knowledge load failed: \(error.localizedDescription)"
+        }
+    }
+
+    func loadKnowledgeFile(_ file: KnowledgeFileSummary) async {
+        knowledgeIsLoading = true
+        selectedKnowledgeFile = file
+        knowledgeStatus = "Opening \(file.path)..."
+        do {
+            let client = try knowledgeClient()
+            let response = try await client.readFile(scope: file.scope, path: file.path)
+            knowledgeEditorText = response.content
+            knowledgeEditorBaseSHA256 = response.sha256
+            knowledgeIsDirty = false
+            knowledgeStatus = "Loaded \(response.path)"
+            knowledgeIsLoading = false
+        } catch {
+            knowledgeIsLoading = false
+            knowledgeStatus = "Open failed: \(error.localizedDescription)"
+        }
+    }
+
+    func markKnowledgeDirty() {
+        knowledgeIsDirty = true
+    }
+
+    func saveKnowledgeFile() async {
+        guard let selectedKnowledgeFile else {
+            knowledgeStatus = "Select a file first."
+            return
+        }
+        knowledgeIsLoading = true
+        knowledgeStatus = "Saving \(selectedKnowledgeFile.path)..."
+        do {
+            let client = try knowledgeClient()
+            let response = try await client.writeFile(
+                scope: selectedKnowledgeFile.scope,
+                path: selectedKnowledgeFile.path,
+                content: knowledgeEditorText,
+                baseSHA256: knowledgeEditorBaseSHA256
+            )
+            knowledgeEditorBaseSHA256 = response.sha256
+            knowledgeIsDirty = false
+            knowledgeStatus = response.backupPath == nil
+                ? "Saved \(response.path)"
+                : "Saved \(response.path); backup created"
+            knowledgeIsLoading = false
+            await loadKnowledgeFiles(scope: selectedKnowledgeFile.scope)
+        } catch {
+            knowledgeIsLoading = false
+            knowledgeStatus = "Save failed: \(error.localizedDescription)"
         }
     }
 

@@ -15,7 +15,10 @@
 use anyhow::Result;
 use futures::SinkExt;
 use futures::stream::StreamExt;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::net::SocketAddr;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -34,6 +37,7 @@ pub use registry::DeviceRegistry;
 /// Default gateway port ("jc" on phone keypad = 52, but we use 7643)
 pub const DEFAULT_PORT: u16 = 7643;
 const WEBSOCKET_KEEPALIVE_INTERVAL_SECS: u64 = 20;
+const MAX_HTTP_BODY_BYTES: usize = 300 * 1024;
 
 /// Gateway configuration
 #[derive(Debug, Clone)]
@@ -323,23 +327,75 @@ async fn handle_ws_connection(
 fn http_response(status: u16, status_text: &str, body: &str) -> Vec<u8> {
     format!(
         "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: Content-Type\r\n\r\n{}",
-        status, status_text, body.len(), body
+        status,
+        status_text,
+        body.as_bytes().len(),
+        body
     ).into_bytes()
+}
+
+async fn read_http_request(tcp_stream: &mut tokio::net::TcpStream) -> Result<String> {
+    let mut request_bytes = vec![0u8; 8192];
+    let mut bytes_read = tcp_stream.read(&mut request_bytes).await?;
+    request_bytes.truncate(bytes_read);
+
+    loop {
+        let header_end = request_bytes
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .map(|index| index + 4);
+        let Some(header_end) = header_end else {
+            let mut chunk = [0u8; 8192];
+            let n = tcp_stream.read(&mut chunk).await?;
+            if n == 0 {
+                break;
+            }
+            request_bytes.extend_from_slice(&chunk[..n]);
+            bytes_read += n;
+            if bytes_read > MAX_HTTP_BODY_BYTES + 8192 {
+                anyhow::bail!("HTTP request is too large");
+            }
+            continue;
+        };
+
+        let headers = String::from_utf8_lossy(&request_bytes[..header_end]);
+        let content_length = content_length_from_headers(&headers).unwrap_or(0);
+        if content_length > MAX_HTTP_BODY_BYTES {
+            anyhow::bail!("HTTP body is too large");
+        }
+        let body_read = request_bytes.len().saturating_sub(header_end);
+        if body_read >= content_length {
+            break;
+        }
+        let mut chunk = vec![0u8; (content_length - body_read).min(8192)];
+        let n = tcp_stream.read(&mut chunk).await?;
+        if n == 0 {
+            break;
+        }
+        request_bytes.extend_from_slice(&chunk[..n]);
+    }
+
+    Ok(String::from_utf8_lossy(&request_bytes).into_owned())
+}
+
+fn content_length_from_headers(headers: &str) -> Option<usize> {
+    header_value(headers, "content-length")?.parse().ok()
 }
 
 /// Handle a plain HTTP request (not WebSocket).
 /// Supports:
-///   GET  /health  - server status
-///   POST /pair    - exchange pairing code for auth token
-///   OPTIONS *     - CORS preflight
+///   GET  /health            - server status
+///   POST /pair              - exchange pairing code for auth token
+///   GET  /knowledge/files   - list editable identity/wiki files
+///   GET  /knowledge/file    - read one editable identity/wiki file
+///   POST /knowledge/file    - update one editable identity/wiki file
+///   OPTIONS *               - CORS preflight
 async fn handle_http(
     mut tcp_stream: tokio::net::TcpStream,
     peer_addr: SocketAddr,
     registry: Arc<tokio::sync::RwLock<DeviceRegistry>>,
 ) -> Result<()> {
-    let mut buf = vec![0u8; 8192];
-    let n = tcp_stream.read(&mut buf).await?;
-    let request = String::from_utf8_lossy(&buf[..n]);
+    let request = read_http_request(&mut tcp_stream).await?;
 
     let first_line = request.lines().next().unwrap_or("");
     let (method, path) = {
@@ -370,9 +426,34 @@ async fn handle_http(
         }
 
         ("POST", "/pair") => {
-            // Extract JSON body (after \r\n\r\n)
-            let body_str = request.split("\r\n\r\n").nth(1).unwrap_or("");
+            let body_str = http_body(&request);
             handle_pair_request(body_str, &registry).await
+        }
+
+        ("GET", "/knowledge/files") => {
+            if let Err(response) = authorize_http_request(&request, &registry).await {
+                response
+            } else {
+                let query = path.split_once('?').map(|(_, query)| query).unwrap_or("");
+                handle_knowledge_list_request(query).await
+            }
+        }
+
+        ("GET", "/knowledge/file") => {
+            if let Err(response) = authorize_http_request(&request, &registry).await {
+                response
+            } else {
+                let query = path.split_once('?').map(|(_, query)| query).unwrap_or("");
+                handle_knowledge_read_request(query).await
+            }
+        }
+
+        ("POST", "/knowledge/file") => {
+            if let Err(response) = authorize_http_request(&request, &registry).await {
+                response
+            } else {
+                handle_knowledge_write_request(http_body(&request)).await
+            }
         }
 
         ("OPTIONS", _) => {
@@ -390,6 +471,450 @@ async fn handle_http(
     tcp_stream.write_all(&response).await?;
     tcp_stream.shutdown().await?;
     Ok(())
+}
+
+fn http_body(request: &str) -> &str {
+    request.split("\r\n\r\n").nth(1).unwrap_or("")
+}
+
+fn header_value<'a>(request: &'a str, header_name: &str) -> Option<&'a str> {
+    request.lines().skip(1).find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        if name.trim().eq_ignore_ascii_case(header_name) {
+            Some(value.trim())
+        } else {
+            None
+        }
+    })
+}
+
+async fn authorize_http_request(
+    request: &str,
+    registry: &Arc<tokio::sync::RwLock<DeviceRegistry>>,
+) -> std::result::Result<(), Vec<u8>> {
+    let Some(header) = header_value(request, "authorization") else {
+        let body = serde_json::json!({"error": "Missing Authorization bearer token"});
+        return Err(http_response(401, "Unauthorized", &body.to_string()));
+    };
+    let Some(token) = auth::parse_bearer_token(header) else {
+        let body = serde_json::json!({"error": "Invalid Authorization bearer token"});
+        return Err(http_response(401, "Unauthorized", &body.to_string()));
+    };
+
+    let mut reg = registry.write().await;
+    *reg = DeviceRegistry::load();
+    if reg.validate_token(token).is_some() {
+        reg.touch_device(token);
+        Ok(())
+    } else {
+        let body = serde_json::json!({"error": "Invalid or expired auth token"});
+        Err(http_response(401, "Unauthorized", &body.to_string()))
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum KnowledgeScope {
+    Identity,
+    Wiki,
+}
+
+#[derive(Debug, Serialize)]
+struct KnowledgeFileSummary {
+    scope: KnowledgeScope,
+    path: String,
+    title: String,
+    byte_len: u64,
+    modified_unix_secs: Option<u64>,
+    sha256: String,
+}
+
+#[derive(Debug, Serialize)]
+struct KnowledgeFileRead {
+    scope: KnowledgeScope,
+    path: String,
+    title: String,
+    content: String,
+    sha256: String,
+    byte_len: u64,
+    modified_unix_secs: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct KnowledgeWriteRequest {
+    scope: KnowledgeScope,
+    path: String,
+    content: String,
+    base_sha256: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct KnowledgeWriteResponse {
+    scope: KnowledgeScope,
+    path: String,
+    sha256: String,
+    backup_path: Option<String>,
+}
+
+async fn handle_knowledge_list_request(query: &str) -> Vec<u8> {
+    match knowledge_scope_from_query(query).and_then(list_knowledge_files) {
+        Ok(files) => http_response(
+            200,
+            "OK",
+            &serde_json::json!({ "files": files }).to_string(),
+        ),
+        Err(error) => json_error_response(400, "Bad Request", &error.to_string()),
+    }
+}
+
+async fn handle_knowledge_read_request(query: &str) -> Vec<u8> {
+    let result = knowledge_scope_from_query(query).and_then(|scope| {
+        let path = query_param(query, "path")
+            .filter(|path| !path.trim().is_empty())
+            .ok_or_else(|| anyhow::anyhow!("missing path"))?;
+        read_knowledge_file(scope, &path)
+    });
+
+    match result {
+        Ok(file) => http_response(200, "OK", &serde_json::to_string(&file).unwrap()),
+        Err(error) => json_error_response(400, "Bad Request", &error.to_string()),
+    }
+}
+
+async fn handle_knowledge_write_request(body: &str) -> Vec<u8> {
+    let req: KnowledgeWriteRequest = match serde_json::from_str(body) {
+        Ok(req) => req,
+        Err(error) => {
+            return json_error_response(400, "Bad Request", &format!("Invalid JSON: {error}"));
+        }
+    };
+
+    match write_knowledge_file(req) {
+        Ok(response) => http_response(200, "OK", &serde_json::to_string(&response).unwrap()),
+        Err(error) => json_error_response(400, "Bad Request", &error.to_string()),
+    }
+}
+
+fn json_error_response(status: u16, status_text: &str, message: &str) -> Vec<u8> {
+    let body = serde_json::json!({ "error": message });
+    http_response(status, status_text, &body.to_string())
+}
+
+fn knowledge_scope_from_query(query: &str) -> Result<KnowledgeScope> {
+    match query_param(query, "scope")
+        .unwrap_or_else(|| "identity".to_string())
+        .as_str()
+    {
+        "identity" => Ok(KnowledgeScope::Identity),
+        "wiki" => Ok(KnowledgeScope::Wiki),
+        other => anyhow::bail!("unsupported knowledge scope '{other}'"),
+    }
+}
+
+fn query_param(query: &str, key: &str) -> Option<String> {
+    query.split('&').find_map(|pair| {
+        let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if percent_decode(name) == key {
+            Some(percent_decode(value))
+        } else {
+            None
+        }
+    })
+}
+
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => {
+                output.push(b' ');
+                index += 1;
+            }
+            b'%' if index + 2 < bytes.len() => {
+                if let Ok(hex) = std::str::from_utf8(&bytes[index + 1..index + 3])
+                    && let Ok(value) = u8::from_str_radix(hex, 16)
+                {
+                    output.push(value);
+                    index += 3;
+                    continue;
+                }
+                output.push(bytes[index]);
+                index += 1;
+            }
+            byte => {
+                output.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&output).into_owned()
+}
+
+fn list_knowledge_files(scope: KnowledgeScope) -> Result<Vec<KnowledgeFileSummary>> {
+    let root = knowledge_root(scope)?;
+    let mut files = Vec::new();
+    for relative_path in allowed_knowledge_paths(scope, &root)? {
+        let absolute_path = root.join(&relative_path);
+        if !absolute_path.is_file() {
+            continue;
+        }
+        files.push(file_summary(scope, &root, &relative_path)?);
+    }
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(files)
+}
+
+fn read_knowledge_file(scope: KnowledgeScope, path: &str) -> Result<KnowledgeFileRead> {
+    let root = knowledge_root(scope)?;
+    let relative_path = validate_knowledge_path(scope, &root, path)?;
+    let absolute_path = root.join(&relative_path);
+    let content = std::fs::read_to_string(&absolute_path)
+        .map_err(|error| anyhow::anyhow!("failed to read {}: {error}", relative_path.display()))?;
+    let metadata = std::fs::metadata(&absolute_path)?;
+    Ok(KnowledgeFileRead {
+        scope,
+        path: slash_path(&relative_path),
+        title: knowledge_title(&relative_path, &content),
+        sha256: sha256_hex(content.as_bytes()),
+        byte_len: metadata.len(),
+        modified_unix_secs: metadata_modified_unix_secs(&metadata),
+        content,
+    })
+}
+
+fn write_knowledge_file(req: KnowledgeWriteRequest) -> Result<KnowledgeWriteResponse> {
+    if req.content.len() > 256 * 1024 {
+        anyhow::bail!("file is too large for mobile editing");
+    }
+    reject_secret_like_content(&req.content)?;
+
+    let root = knowledge_root(req.scope)?;
+    let relative_path = validate_knowledge_path(req.scope, &root, &req.path)?;
+    let absolute_path = root.join(&relative_path);
+    let existing = std::fs::read_to_string(&absolute_path)
+        .map_err(|error| anyhow::anyhow!("failed to read {}: {error}", relative_path.display()))?;
+    let existing_hash = sha256_hex(existing.as_bytes());
+    if let Some(base_hash) = req.base_sha256.as_deref()
+        && base_hash != existing_hash
+    {
+        anyhow::bail!("file changed on disk; reload before saving");
+    }
+
+    let backup_path = backup_knowledge_file(req.scope, &absolute_path, &relative_path)?;
+    std::fs::write(&absolute_path, req.content.as_bytes())
+        .map_err(|error| anyhow::anyhow!("failed to write {}: {error}", relative_path.display()))?;
+    Ok(KnowledgeWriteResponse {
+        scope: req.scope,
+        path: slash_path(&relative_path),
+        sha256: sha256_hex(req.content.as_bytes()),
+        backup_path: backup_path.map(|path| path.display().to_string()),
+    })
+}
+
+fn knowledge_root(scope: KnowledgeScope) -> Result<PathBuf> {
+    match scope {
+        KnowledgeScope::Identity => std::env::current_dir()
+            .map_err(|error| anyhow::anyhow!("failed to resolve current workspace: {error}")),
+        KnowledgeScope::Wiki => Ok(home_dir()?.join("brain/wiki")),
+    }
+}
+
+fn home_dir() -> Result<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("HOME is not set"))
+}
+
+fn allowed_knowledge_paths(scope: KnowledgeScope, root: &Path) -> Result<Vec<PathBuf>> {
+    match scope {
+        KnowledgeScope::Identity => Ok(identity_paths(root)),
+        KnowledgeScope::Wiki => wiki_paths(root),
+    }
+}
+
+fn identity_paths(root: &Path) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for path in ["AGENTS.md", "CLAUDE.md"] {
+        if root.join(path).is_file() {
+            paths.push(PathBuf::from(path));
+        }
+    }
+    collect_matching_files(&root.join(".claude/agents"), root, &mut paths, |path| {
+        path.extension().is_some_and(|ext| ext == "md")
+    });
+    collect_matching_files(&root.join(".claude/skills"), root, &mut paths, |path| {
+        path.file_name().is_some_and(|name| name == "SKILL.md")
+    });
+    let settings = PathBuf::from(".claude/settings.json");
+    if root.join(&settings).is_file() {
+        paths.push(settings);
+    }
+    paths
+}
+
+fn wiki_paths(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    for path in ["index.md", "AGENTS.md", "log.md"] {
+        if root.join(path).is_file() {
+            paths.push(PathBuf::from(path));
+        }
+    }
+    for dir in ["concepts", "entities", "answers", "sources"] {
+        collect_matching_files(&root.join(dir), root, &mut paths, |path| {
+            path.extension().is_some_and(|ext| ext == "md")
+        });
+    }
+    Ok(paths)
+}
+
+fn collect_matching_files(
+    dir: &Path,
+    root: &Path,
+    paths: &mut Vec<PathBuf>,
+    matches: fn(&Path) -> bool,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_matching_files(&path, root, paths, matches);
+        } else if matches(&path)
+            && let Ok(relative) = path.strip_prefix(root)
+        {
+            paths.push(relative.to_path_buf());
+        }
+    }
+}
+
+fn validate_knowledge_path(scope: KnowledgeScope, root: &Path, path: &str) -> Result<PathBuf> {
+    let relative_path = safe_relative_path(path)?;
+    let allowed = allowed_knowledge_paths(scope, root)?;
+    if allowed.iter().any(|allowed| allowed == &relative_path) {
+        Ok(relative_path)
+    } else {
+        anyhow::bail!("path is not editable from mobile")
+    }
+}
+
+fn safe_relative_path(path: &str) -> Result<PathBuf> {
+    let path = Path::new(path.trim_start_matches('/'));
+    if path.as_os_str().is_empty() {
+        anyhow::bail!("path cannot be empty");
+    }
+    if path.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        anyhow::bail!("path must stay inside the editable knowledge root");
+    }
+    Ok(path.to_path_buf())
+}
+
+fn file_summary(
+    scope: KnowledgeScope,
+    root: &Path,
+    relative_path: &Path,
+) -> Result<KnowledgeFileSummary> {
+    let absolute_path = root.join(relative_path);
+    let content = std::fs::read_to_string(&absolute_path).unwrap_or_default();
+    let metadata = std::fs::metadata(&absolute_path)?;
+    Ok(KnowledgeFileSummary {
+        scope,
+        path: slash_path(relative_path),
+        title: knowledge_title(relative_path, &content),
+        byte_len: metadata.len(),
+        modified_unix_secs: metadata_modified_unix_secs(&metadata),
+        sha256: sha256_hex(content.as_bytes()),
+    })
+}
+
+fn knowledge_title(relative_path: &Path, content: &str) -> String {
+    content
+        .lines()
+        .find_map(|line| line.strip_prefix("# ").map(str::trim))
+        .filter(|title| !title.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            relative_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(ToOwned::to_owned)
+        })
+        .unwrap_or_else(|| slash_path(relative_path))
+}
+
+fn metadata_modified_unix_secs(metadata: &std::fs::Metadata) -> Option<u64> {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs())
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn slash_path(path: &Path) -> String {
+    path.components()
+        .filter_map(|component| match component {
+            Component::Normal(value) => value.to_str(),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn reject_secret_like_content(content: &str) -> Result<()> {
+    let lowered = content.to_ascii_lowercase();
+    for marker in [
+        "ghp_",
+        "sk-",
+        "api_key=",
+        "api-key",
+        "access_token",
+        "refresh_token",
+        "private key",
+        "-----begin",
+    ] {
+        if lowered.contains(marker) {
+            anyhow::bail!("mobile knowledge edits cannot save secret-like content");
+        }
+    }
+    Ok(())
+}
+
+fn backup_knowledge_file(
+    scope: KnowledgeScope,
+    absolute_path: &Path,
+    relative_path: &Path,
+) -> Result<Option<PathBuf>> {
+    if !absolute_path.exists() {
+        return Ok(None);
+    }
+    let scope_name = match scope {
+        KnowledgeScope::Identity => "identity",
+        KnowledgeScope::Wiki => "wiki",
+    };
+    let timestamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+    let backup_path = home_dir()?
+        .join(".jcode/mobile-edit-backups")
+        .join(scope_name)
+        .join(format!(
+            "{timestamp}-{}",
+            slash_path(relative_path).replace('/', "__")
+        ));
+    if let Some(parent) = backup_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::copy(absolute_path, &backup_path)?;
+    Ok(Some(backup_path))
 }
 
 /// Handle POST /pair request.

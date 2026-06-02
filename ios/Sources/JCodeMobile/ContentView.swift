@@ -250,11 +250,12 @@ struct JCTextField: View {
                         .frame(width: 20)
                 }
 
-                TextField(placeholder, text: $text)
+                TextField(label, text: $text, prompt: Text(placeholder))
                     .font(JC.Fonts.body)
                     .foregroundStyle(JC.Colors.textPrimary)
                     .focused($isFocused)
                     .keyboardType(keyboardType)
+                    .textContentType(.none)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
             }
@@ -275,30 +276,50 @@ struct JCTextField: View {
 
 struct MainView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @StateObject private var speech = SpeechRecognizer()
     @State private var showSettings = false
     @State private var floatingAttachments: [ImageAttachment] = []
     @State private var showFloatingCamera = false
+    @State private var draftMessage = ""
 
     var body: some View {
+        Group {
+            if horizontalSizeClass == .regular {
+                iPadLayout
+            } else {
+                phoneLayout
+            }
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsSheet()
+        }
+        .fullScreenCover(isPresented: $showFloatingCamera) {
+            CameraPickerView { image in
+                if let attachment = ImageAttachment.from(image: image) {
+                    floatingAttachments.append(attachment)
+                }
+            }
+        }
+    }
+
+    private var phoneLayout: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .trailing) {
                 JC.Colors.background.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     StreamView()
-                    ChatInputBar(externalAttachments: $floatingAttachments)
+                    ChatInputBar(draftMessage: $draftMessage, externalAttachments: $floatingAttachments)
                 }
 
                 FloatingActions(
                     speech: speech,
                     showCamera: $showFloatingCamera,
-                    draftMessage: $model.draftMessage,
+                    draftMessage: $draftMessage,
                     cameraEnabled: !model.isProcessing
                 )
-            }
-            .sheet(isPresented: $showSettings) {
-                SettingsSheet()
+                .padding(.trailing, JC.Spacing.md)
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -313,13 +334,115 @@ struct MainView: View {
                     .accessibilityHint("Open connection, pairing, and session settings")
                 }
             }
-            .fullScreenCover(isPresented: $showFloatingCamera) {
-                CameraPickerView { image in
-                    if let attachment = ImageAttachment.from(image: image) {
-                        floatingAttachments.append(attachment)
+        }
+    }
+
+    private var iPadLayout: some View {
+        NavigationSplitView {
+            IPadSidebar(showSettings: $showSettings)
+                .navigationTitle("jcode")
+        } detail: {
+            ZStack(alignment: .trailing) {
+                JC.Colors.background.ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    StreamView()
+                        .frame(maxWidth: 900)
+                    ChatInputBar(draftMessage: $draftMessage, externalAttachments: $floatingAttachments)
+                        .frame(maxWidth: 900)
+                }
+                .frame(maxWidth: .infinity)
+
+                FloatingActions(
+                    speech: speech,
+                    showCamera: $showFloatingCamera,
+                    draftMessage: $draftMessage,
+                    cameraEnabled: !model.isProcessing
+                )
+                .padding(.trailing, JC.Spacing.xl)
+            }
+            .navigationTitle(model.activeSessionId.isEmpty ? "Session" : model.activeSessionId)
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+struct IPadSidebar: View {
+    @EnvironmentObject private var model: AppModel
+    @Binding var showSettings: Bool
+
+    var body: some View {
+        List {
+            Section("Connection") {
+                Label(connectionLabel, systemImage: connectionIcon)
+                    .foregroundStyle(connectionColor)
+                if let server = model.selectedServer {
+                    Text("\(server.host):\(server.port)")
+                        .font(JC.Fonts.caption)
+                        .foregroundStyle(JC.Colors.textSecondary)
+                }
+                Button { showSettings = true } label: {
+                    Label("Settings & Knowledge", systemImage: "gearshape.fill")
+                }
+            }
+
+            Section("Sessions") {
+                if model.sessions.isEmpty {
+                    Text("No sessions loaded")
+                        .foregroundStyle(JC.Colors.textTertiary)
+                } else {
+                    ForEach(model.sessions, id: \.self) { sessionId in
+                        Button {
+                            Task { await model.switchToSession(sessionId) }
+                        } label: {
+                            HStack {
+                                Text(sessionId).lineLimit(1)
+                                Spacer()
+                                if sessionId == model.activeSessionId {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(JC.Colors.accent)
+                                }
+                            }
+                        }
                     }
                 }
             }
+
+            Section("Model") {
+                Text(model.modelName.isEmpty ? "Unknown" : model.modelName)
+                    .lineLimit(2)
+                if !model.providerName.isEmpty {
+                    Text(model.providerName)
+                        .font(JC.Fonts.caption)
+                        .foregroundStyle(JC.Colors.textSecondary)
+                }
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(JC.Colors.background)
+    }
+
+    private var connectionLabel: String {
+        switch model.connectionState {
+        case .connected: "Connected"
+        case .connecting: "Connecting"
+        case .disconnected: "Disconnected"
+        }
+    }
+
+    private var connectionIcon: String {
+        switch model.connectionState {
+        case .connected: "checkmark.circle.fill"
+        case .connecting: "arrow.triangle.2.circlepath"
+        case .disconnected: "xmark.circle"
+        }
+    }
+
+    private var connectionColor: Color {
+        switch model.connectionState {
+        case .connected: JC.Colors.green
+        case .connecting: JC.Colors.amber
+        case .disconnected: JC.Colors.textTertiary
         }
     }
 }
@@ -359,8 +482,6 @@ struct FloatingActions: View {
                 speech.toggleRecording()
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-        .padding(.trailing, JC.Spacing.md)
         .onChange(of: speech.transcript) { _, newValue in
             let dictated = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !dictated.isEmpty else { return }
@@ -738,10 +859,140 @@ struct ToolDetailLine: View {
     }
 }
 
+// MARK: - Knowledge Editor
+
+struct KnowledgeEditorSheet: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedScope: KnowledgeScope = .identity
+
+    var body: some View {
+        NavigationSplitView {
+            VStack(spacing: 0) {
+                Picker("Knowledge scope", selection: $selectedScope) {
+                    ForEach(KnowledgeScope.allCases, id: \.self) { scope in
+                        Text(scope.displayName).tag(scope)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(JC.Spacing.md)
+                .onChange(of: selectedScope) { _, scope in
+                    Task { await model.loadKnowledgeFiles(scope: scope) }
+                }
+
+                List(selection: Binding(
+                    get: { model.selectedKnowledgeFile?.id },
+                    set: { id in
+                        guard let id,
+                              let file = model.knowledgeFiles.first(where: { $0.id == id }) else { return }
+                        Task { await model.loadKnowledgeFile(file) }
+                    }
+                )) {
+                    ForEach(model.knowledgeFiles) { file in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(file.title)
+                                .font(JC.Fonts.callout)
+                                .lineLimit(1)
+                            Text(file.path)
+                                .font(JC.Fonts.caption)
+                                .foregroundStyle(JC.Colors.textTertiary)
+                                .lineLimit(1)
+                        }
+                        .tag(file.id)
+                    }
+                }
+                .scrollContentBackground(.hidden)
+            }
+            .background(JC.Colors.background)
+            .navigationTitle("Knowledge")
+        } detail: {
+            ZStack {
+                JC.Colors.background.ignoresSafeArea()
+                VStack(alignment: .leading, spacing: JC.Spacing.md) {
+                    editorHeader
+                    TextEditor(text: Binding(
+                        get: { model.knowledgeEditorText },
+                        set: { value in
+                            model.knowledgeEditorText = value
+                            model.markKnowledgeDirty()
+                        }
+                    ))
+                    .font(.system(size: 15, design: .monospaced))
+                    .foregroundStyle(JC.Colors.textPrimary)
+                    .scrollContentBackground(.hidden)
+                    .padding(JC.Spacing.sm)
+                    .background(JC.Colors.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: JC.Radius.md, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: JC.Radius.md, style: .continuous)
+                            .stroke(model.knowledgeIsDirty ? JC.Colors.amber : JC.Colors.border, lineWidth: 1)
+                    )
+                }
+                .padding(JC.Spacing.lg)
+            }
+            .navigationTitle(model.selectedKnowledgeFile?.title ?? "File")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .preferredColorScheme(.dark)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Done") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button {
+                    Task { await model.saveKnowledgeFile() }
+                } label: {
+                    Label("Save", systemImage: "square.and.arrow.down")
+                }
+                .disabled(!model.knowledgeIsDirty || model.knowledgeIsLoading)
+            }
+        }
+        .task {
+            selectedScope = model.knowledgeScope
+            await model.loadKnowledgeFiles(scope: selectedScope)
+        }
+    }
+
+    private var editorHeader: some View {
+        VStack(alignment: .leading, spacing: JC.Spacing.xs) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.selectedKnowledgeFile?.path ?? "Select a file")
+                        .font(JC.Fonts.headline)
+                        .foregroundStyle(JC.Colors.textPrimary)
+                        .lineLimit(1)
+                    Text(model.knowledgeStatus)
+                        .font(JC.Fonts.caption)
+                        .foregroundStyle(statusColor)
+                }
+                Spacer()
+                if model.knowledgeIsLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(JC.Colors.accent)
+                }
+                if model.knowledgeIsDirty {
+                    Text("Unsaved")
+                        .font(JC.Fonts.caption)
+                        .foregroundStyle(JC.Colors.amber)
+                }
+            }
+        }
+    }
+
+    private var statusColor: Color {
+        if model.knowledgeStatus.lowercased().contains("failed") {
+            return JC.Colors.destructive
+        }
+        return JC.Colors.textSecondary
+    }
+}
+
 // MARK: - Chat Input Bar
 
 struct ChatInputBar: View {
     @EnvironmentObject private var model: AppModel
+    @Binding var draftMessage: String
     @Binding var externalAttachments: [ImageAttachment]
     @State private var attachments: [ImageAttachment] = []
     @FocusState private var inputFocused: Bool
@@ -795,10 +1046,12 @@ struct ChatInputBar: View {
                 PhotoPickerButton(attachments: $attachments, isEnabled: !model.isProcessing)
 
                 HStack(spacing: 0) {
-                    TextField("Message jcode...", text: $model.draftMessage, axis: .vertical)
+                    TextField("Message jcode...", text: $draftMessage)
                         .font(JC.Fonts.body)
                         .foregroundStyle(JC.Colors.textPrimary)
-                        .lineLimit(1...6)
+                        .lineLimit(1)
+                        .textInputAutocapitalization(.sentences)
+                        .autocorrectionDisabled(false)
                         .focused($inputFocused)
                         .padding(.horizontal, JC.Spacing.md)
                         .padding(.vertical, JC.Spacing.sm + 2)
@@ -812,9 +1065,11 @@ struct ChatInputBar: View {
 
                 Button {
                     let pendingImages = allAttachments.map { ($0.mediaType, $0.base64Data) }
+                    model.draftMessage = draftMessage
                     Task {
                         let sent = await model.sendDraft(images: pendingImages)
                         if sent {
+                            draftMessage = ""
                             attachments.removeAll()
                             externalAttachments.removeAll()
                         }
@@ -839,7 +1094,7 @@ struct ChatInputBar: View {
     }
 
     private var canSend: Bool {
-        let hasText = !model.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasText = !draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasAttachments = !allAttachments.isEmpty
 
         guard model.selectedServer != nil else { return false }
@@ -860,6 +1115,7 @@ struct SettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showQRScanner = false
     @State private var showAddServer = false
+    @State private var showKnowledge = false
     @State private var rustCoreStatus = RustCoreDiagnostics.smoke()
     @State private var notificationStatus = "Not requested"
 
@@ -872,6 +1128,7 @@ struct SettingsSheet: View {
                     VStack(spacing: JC.Spacing.xl) {
                         connectionSection
                         diagnosticsSection
+                        knowledgeSection
                         repairPairingSection
                         serversSection
                         sessionsSection
@@ -900,6 +1157,31 @@ struct SettingsSheet: View {
         }
         .sheet(isPresented: $showAddServer) {
             AddServerSheet(isPresented: $showAddServer)
+        }
+        .sheet(isPresented: $showKnowledge) {
+            KnowledgeEditorSheet()
+        }
+    }
+
+    private var knowledgeSection: some View {
+        VStack(alignment: .leading, spacing: JC.Spacing.md) {
+            SectionHeader(title: "Knowledge")
+
+            VStack(alignment: .leading, spacing: JC.Spacing.md) {
+                Text("View and modify paired desktop identity files and the canonical wiki.")
+                    .font(JC.Fonts.callout)
+                    .foregroundStyle(JC.Colors.textSecondary)
+
+                Button {
+                    showKnowledge = true
+                } label: {
+                    Label("Open Knowledge Editor", systemImage: "square.and.pencil")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(AccentButton())
+                .disabled(model.selectedServer == nil)
+            }
+            .glassCard()
         }
     }
 
