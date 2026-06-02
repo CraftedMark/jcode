@@ -97,6 +97,7 @@ final class AppModel: ObservableObject {
     @Published var gatewayHealthStatus: String = "Not checked"
     @Published var gatewayHealthVersion: String = ""
     @Published var gatewayHealthCheckedAt: Date?
+    @Published var gatewayHealthFailureKind: String = ""
     @Published var connectionTransport: String = "Unknown"
     @Published var connectionPhase: String = "Unknown"
     @Published var statusDetail: String = ""
@@ -231,6 +232,7 @@ final class AppModel: ObservableObject {
             guard let port = parsePort() else {
                 gatewayHealthStatus = "Port must be a number from 0 to 65535."
                 gatewayHealthVersion = ""
+                gatewayHealthFailureKind = "Invalid port"
                 gatewayHealthCheckedAt = Date()
                 return
             }
@@ -238,6 +240,7 @@ final class AppModel: ObservableObject {
             guard !host.isEmpty else {
                 gatewayHealthStatus = "Host cannot be empty."
                 gatewayHealthVersion = ""
+                gatewayHealthFailureKind = "Missing host"
                 gatewayHealthCheckedAt = Date()
                 return
             }
@@ -247,6 +250,7 @@ final class AppModel: ObservableObject {
 
         gatewayHealthStatus = "Checking \(targetHost):\(targetPort)..."
         gatewayHealthVersion = ""
+        gatewayHealthFailureKind = ""
         gatewayHealthCheckedAt = Date()
 
         do {
@@ -255,10 +259,18 @@ final class AppModel: ObservableObject {
                 ? "Gateway reachable"
                 : "Server reachable, gateway flag missing"
             gatewayHealthVersion = response.version
+            gatewayHealthFailureKind = ""
             gatewayHealthCheckedAt = Date()
         } catch {
-            gatewayHealthStatus = "Gateway unreachable. Check host, port, network, and jcode serve."
+            let failure = GatewayDiagnosticFailure.classify(
+                error,
+                phase: .health,
+                host: targetHost,
+                port: targetPort
+            )
+            gatewayHealthStatus = failure.userMessage
             gatewayHealthVersion = ""
+            gatewayHealthFailureKind = failure.shortLabel
             gatewayHealthCheckedAt = Date()
         }
     }
@@ -399,6 +411,8 @@ final class AppModel: ObservableObject {
             switch error {
             case .serverUnreachable:
                 errorMessage = "Server unreachable. Confirm host/port and gateway status."
+            case .gatewayUnavailable(let failure):
+                errorMessage = failure.userMessage
             case .invalidCode(let message):
                 errorMessage = message
             case .serverError(let message):
@@ -500,8 +514,15 @@ final class AppModel: ObservableObject {
             shouldAutoReconnect = false
             reconnecting = false
             clientDelegate = nil
-            errorMessage = "Connect failed: \(error.localizedDescription)"
-            dispatchCore(action: #"{"type":"connection_failed","message":\#(error.localizedDescription.jsonEscapedForMobileCore)}"#)
+            let failure = GatewayDiagnosticFailure.classify(
+                error,
+                phase: .webSocket,
+                host: credential.host,
+                port: credential.port
+            )
+            errorMessage = "Connect failed: \(failure.userMessage)"
+            lastDisconnectReason = failure.shortLabel
+            dispatchCore(action: #"{"type":"connection_failed","message":\#(failure.userMessage.jsonEscapedForMobileCore)}"#)
         }
     }
 
