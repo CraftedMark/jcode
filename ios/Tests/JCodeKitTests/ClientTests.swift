@@ -129,6 +129,62 @@ func runClientTests() {
     }
 
     do {
+        print("  Gateway diagnostics...")
+        let dns = GatewayDiagnosticFailure.classify(
+            URLError(.cannotFindHost),
+            phase: .health,
+            host: "missing.tailnet",
+            port: 7643
+        )
+        assertEqual2(dns.kind, .dns)
+        assertEqual2(dns.shortLabel, "DNS / host failure")
+        check2(dns.userMessage.contains("missing.tailnet"))
+
+        let closed = GatewayDiagnosticFailure.classify(
+            URLError(.cannotConnectToHost),
+            phase: .webSocket,
+            host: "100.113.37.61",
+            port: 7643
+        )
+        assertEqual2(closed.kind, .portClosed)
+        check2(closed.userMessage.contains("jcode serve"))
+
+        let timeout = GatewayDiagnosticFailure.classify(
+            URLError(.timedOut),
+            phase: .health,
+            host: "100.113.37.61",
+            port: 7643
+        )
+        assertEqual2(timeout.kind, .timedOut)
+
+        let offline = GatewayDiagnosticFailure.classify(
+            URLError(.notConnectedToInternet),
+            phase: .health,
+            host: "100.113.37.61",
+            port: 7643
+        )
+        assertEqual2(offline.kind, .offline)
+
+        let auth = GatewayDiagnosticFailure.httpStatus(
+            401,
+            phase: .webSocket,
+            host: "100.113.37.61",
+            port: 7643
+        )
+        assertEqual2(auth.kind, .auth)
+        check2(auth.userMessage.contains("Re-pair"))
+
+        let server = GatewayDiagnosticFailure.httpStatus(
+            503,
+            phase: .health,
+            host: "100.113.37.61",
+            port: 7643
+        )
+        assertEqual2(server.kind, .server)
+        assertEqual2(server.statusCode, 503)
+    }
+
+    do {
         print("  HistoryMessage with tool data...")
         let json = """
         {"role":"assistant","content":"Let me check.",

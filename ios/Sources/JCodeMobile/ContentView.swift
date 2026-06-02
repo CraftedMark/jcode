@@ -1289,6 +1289,9 @@ struct SettingsSheet: View {
 
     private var gatewayDiagnosticText: String {
         var parts = [model.gatewayHealthStatus]
+        if !model.gatewayHealthFailureKind.isEmpty {
+            parts.append(model.gatewayHealthFailureKind)
+        }
         if !model.gatewayHealthVersion.isEmpty {
             parts.append(model.gatewayHealthVersion)
         }

@@ -115,6 +115,9 @@ Already implemented:
 - Settings diagnostics view shows selected server, app version, server version,
   transport, connection phase, provider, status detail, last disconnect,
   notification status, and gateway health.
+- Mobile gateway diagnostics classify common health, pairing, and WebSocket
+  failures into actionable DNS, port, timeout, offline, auth, server, and
+  invalid-response states.
 - Authenticated mobile knowledge endpoints can list, read, and write allowlisted
   identity files and canonical wiki pages with conflict detection, backup
   creation, size limits, and secret-like content rejection.
@@ -128,8 +131,7 @@ Open gaps:
 - APNs registration, Live Activities, and privacy/lock-screen controls for
   approvals and notifications are not yet wired.
 - Diagnostics still need real-device and live-gateway acceptance, including
-  safe log excerpts and failure classification beyond the locally replayed
-  event set.
+  safe log excerpts beyond the locally replayed event set.
 - Knowledge editing still needs live-gateway acceptance on a paired iPhone/iPad
   before it should be treated as beta-complete.
 
@@ -453,7 +455,7 @@ Status: In progress.
   reconnect, and recover from gateway restart.
 - Validate the diagnostics view on a physical iPhone against the live gateway,
   including connection phase, provider/model, status detail, disconnect reason,
-  and gateway health.
+  gateway health, and classified failure states.
 - Validate knowledge editing on a paired mobile device: list identity files,
   read a wiki page, save an allowlisted test edit, confirm backup creation, and
   confirm stale-write rejection.

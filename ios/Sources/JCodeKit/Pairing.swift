@@ -47,9 +47,34 @@ public struct PairingClient: Sendable {
 
     public func checkHealth() async throws -> HealthResponse {
         let url = baseURL.appendingPathComponent("health")
-        let (data, response) = try await Self.insecureSession.data(from: url)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw PairingError.serverUnreachable
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await Self.insecureSession.data(from: url)
+        } catch {
+            throw PairingError.gatewayUnavailable(
+                GatewayDiagnosticFailure.classify(error, phase: .health, host: host, port: port)
+            )
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw PairingError.gatewayUnavailable(
+                GatewayDiagnosticFailure(
+                    kind: .invalidResponse,
+                    phase: .health,
+                    host: host,
+                    port: port
+                )
+            )
+        }
+        guard http.statusCode == 200 else {
+            throw PairingError.gatewayUnavailable(
+                GatewayDiagnosticFailure.httpStatus(
+                    http.statusCode,
+                    phase: .health,
+                    host: host,
+                    port: port
+                )
+            )
         }
         return try JSONDecoder().decode(HealthResponse.self, from: data)
     }
@@ -75,9 +100,24 @@ public struct PairingClient: Sendable {
         }
         request.httpBody = try JSONEncoder().encode(body)
 
-        let (data, response) = try await Self.insecureSession.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await Self.insecureSession.data(for: request)
+        } catch {
+            throw PairingError.gatewayUnavailable(
+                GatewayDiagnosticFailure.classify(error, phase: .pairing, host: host, port: port)
+            )
+        }
         guard let http = response as? HTTPURLResponse else {
-            throw PairingError.serverUnreachable
+            throw PairingError.gatewayUnavailable(
+                GatewayDiagnosticFailure(
+                    kind: .invalidResponse,
+                    phase: .pairing,
+                    host: host,
+                    port: port
+                )
+            )
         }
 
         switch http.statusCode {
@@ -105,6 +145,7 @@ final class InsecureDelegate: NSObject, URLSessionDelegate, Sendable {
 
 public enum PairingError: Error, Sendable {
     case serverUnreachable
+    case gatewayUnavailable(GatewayDiagnosticFailure)
     case invalidCode(String)
     case serverError(String)
 }
