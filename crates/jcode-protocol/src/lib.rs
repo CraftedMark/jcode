@@ -62,6 +62,34 @@ pub struct SessionActivitySnapshot {
     pub current_tool_name: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionSummary {
+    pub session_id: String,
+    pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_detail: Option<String>,
+    pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_active_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub is_active: bool,
+    #[serde(default)]
+    pub is_live: bool,
+    #[serde(default)]
+    pub client_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<SessionActivitySnapshot>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(transparent)]
 pub struct AuthProviderId(pub String);
@@ -1024,6 +1052,9 @@ pub enum ServerEvent {
         /// All session IDs on the server
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         all_sessions: Vec<String>,
+        /// Rich session inventory for mobile and remote clients.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        session_summaries: Vec<SessionSummary>,
         /// Number of connected clients
         #[serde(skip_serializing_if = "Option::is_none")]
         client_count: Option<usize>,

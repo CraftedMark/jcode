@@ -204,6 +204,7 @@ fn test_history_event_roundtrip_preserves_side_panel_snapshot() -> Result<()> {
         skills: Vec::new(),
         total_tokens: None,
         all_sessions: Vec::new(),
+        session_summaries: Vec::new(),
         client_count: None,
         is_canary: None,
         reload_recovery: None,

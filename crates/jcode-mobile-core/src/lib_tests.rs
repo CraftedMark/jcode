@@ -137,6 +137,37 @@ fn sending_message_creates_assistant_reply() {
 }
 
 #[test]
+fn connected_chat_exposes_switchable_session_summaries() {
+    let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
+    assert_eq!(store.state().session_summaries.len(), 2);
+
+    store.dispatch(SimulatorAction::TapNode {
+        node_id: "chat.session.session_sim_2".to_string(),
+    });
+
+    assert_eq!(
+        store.state().active_session_id.as_deref(),
+        Some("session_sim_2")
+    );
+    assert!(
+        store
+            .state()
+            .session_summaries
+            .iter()
+            .any(|summary| summary.session_id == "session_sim_2" && summary.is_active)
+    );
+
+    let tree = store.semantic_tree();
+    let sessions = tree
+        .root
+        .children
+        .iter()
+        .find(|node| node.id == "chat.sessions")
+        .expect("sessions node");
+    assert_eq!(sessions.children.len(), 2);
+}
+
+#[test]
 fn chat_send_transition_appends_user_and_assistant_placeholder() {
     let mut store = SimulatorStore::new(SimulatorState::for_scenario(ScenarioName::ConnectedChat));
     store.dispatch(SimulatorAction::SetDraft {
@@ -358,6 +389,7 @@ fn history_event_updates_session_model_and_messages() {
             connection_type: Some("simulator".to_string()),
             available_models: vec!["gpt-5.1".to_string(), "claude-sonnet-4".to_string()],
             all_sessions: vec!["session_sim_1".to_string(), "session_sim_2".to_string()],
+            session_summaries: Vec::new(),
             is_canary: None,
             was_interrupted: None,
             total_tokens: None,

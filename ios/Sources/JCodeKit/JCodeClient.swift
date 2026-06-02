@@ -53,6 +53,7 @@ public struct ServerInfo: Sendable {
     public var connectionType: String?
     public var availableModels: [String] = []
     public var allSessions: [String] = []
+    public var sessionSummaries: [SessionSummary] = []
     public var isCanary: Bool = false
     public var wasInterrupted: Bool = false
     public var totalInputTokens: UInt64 = 0
@@ -104,6 +105,7 @@ public protocol JCodeClientDelegate: AnyObject {
     func clientDidUpdateConnectionType(_ connection: String)
     func clientDidUpdateConnectionPhase(_ phase: String)
     func clientDidUpdateStatusDetail(_ detail: String)
+    func clientDidRenameSession(sessionId: String, title: String?, displayTitle: String)
     func clientDidReceiveHistory(messages: [HistoryMessage])
     func clientDidInterrupt(_ interrupt: InterruptInfo)
     func clientDidInjectSoftInterrupt(_ info: SoftInterruptInjectionInfo)
@@ -123,6 +125,7 @@ public extension JCodeClientDelegate {
     func clientDidUpdateConnectionType(_ connection: String) {}
     func clientDidUpdateConnectionPhase(_ phase: String) {}
     func clientDidUpdateStatusDetail(_ detail: String) {}
+    func clientDidRenameSession(sessionId: String, title: String?, displayTitle: String) {}
     func clientDidReceiveHistory(messages: [HistoryMessage]) {}
     func clientDidInterrupt(_ interrupt: InterruptInfo) {}
     func clientDidInjectSoftInterrupt(_ info: SoftInterruptInjectionInfo) {}
@@ -232,8 +235,8 @@ public actor JCodeClient {
         case .sessionId(let sid):
             serverInfo.sessionId = sid
 
-        case .sessionRenamed:
-            break
+        case .sessionRenamed(let sessionId, let title, let displayTitle):
+            await callDelegate { $0.clientDidRenameSession(sessionId: sessionId, title: title, displayTitle: displayTitle) }
 
         case .history(let payload):
             serverInfo.sessionId = payload.sessionId
@@ -245,6 +248,7 @@ public actor JCodeClient {
             serverInfo.connectionType = payload.connectionType
             serverInfo.availableModels = payload.availableModels
             serverInfo.allSessions = payload.allSessions
+            serverInfo.sessionSummaries = payload.sessionSummaries
             serverInfo.isCanary = payload.isCanary ?? false
             serverInfo.wasInterrupted = payload.wasInterrupted ?? false
             if let tokens = payload.totalTokens {

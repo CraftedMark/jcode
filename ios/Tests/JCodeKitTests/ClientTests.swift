@@ -61,6 +61,7 @@ func runClientTests() {
         check2(!info.isCanary)
         check2(!info.wasInterrupted)
         check2(info.allSessions.isEmpty)
+        check2(info.sessionSummaries.isEmpty)
         check2(info.availableModels.isEmpty)
     }
 

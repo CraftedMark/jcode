@@ -132,6 +132,8 @@ pub struct SimulatorState {
     pub draft_message: String,
     pub active_session_id: Option<String>,
     pub sessions: Vec<String>,
+    #[serde(default)]
+    pub session_summaries: Vec<protocol::MobileSessionSummary>,
     pub available_models: Vec<String>,
     pub model_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -178,6 +180,7 @@ impl SimulatorState {
                 draft_message: String::new(),
                 active_session_id: None,
                 sessions: Vec::new(),
+                session_summaries: Vec::new(),
                 available_models: Vec::new(),
                 model_name: None,
                 provider_name: None,
@@ -238,6 +241,10 @@ impl SimulatorState {
                     draft_message: String::new(),
                     active_session_id: Some("session_sim_1".to_string()),
                     sessions: vec!["session_sim_1".to_string(), "session_sim_2".to_string()],
+                    session_summaries: vec![
+                        simulated_session_summary("session_sim_1", "fox", Some("Simulator chat"), true),
+                        simulated_session_summary("session_sim_2", "oak", Some("Release follow-up"), false),
+                    ],
                     available_models: vec!["gpt-5".to_string(), "claude-sonnet-4".to_string()],
                     model_name: Some("gpt-5".to_string()),
                     provider_name: Some("openai".to_string()),
@@ -360,6 +367,30 @@ impl SimulatorState {
                 state
             }
         }
+    }
+}
+
+fn simulated_session_summary(
+    session_id: &str,
+    display_name: &str,
+    title: Option<&str>,
+    is_active: bool,
+) -> protocol::MobileSessionSummary {
+    protocol::MobileSessionSummary {
+        session_id: session_id.to_string(),
+        display_name: display_name.to_string(),
+        title: title.map(ToOwned::to_owned),
+        working_dir: Some("/repo".to_string()),
+        status: "active".to_string(),
+        status_detail: None,
+        updated_at: "2026-06-01T12:00:00Z".to_string(),
+        last_active_at: Some("2026-06-01T12:00:00Z".to_string()),
+        provider_key: Some("openai".to_string()),
+        model: Some("gpt-5".to_string()),
+        is_active,
+        is_live: true,
+        client_count: if is_active { 1 } else { 0 },
+        activity: None,
     }
 }
 
@@ -884,6 +915,23 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
                     state.error_message = Some(format!("Unknown approval node id: {node_id}"));
                 }
             }
+            node_id if node_id.starts_with("chat.session.") => {
+                let session_id = node_id.trim_start_matches("chat.session.").to_string();
+                if state
+                    .sessions
+                    .iter()
+                    .any(|candidate| candidate == &session_id)
+                {
+                    state.active_session_id = Some(session_id.clone());
+                    for summary in &mut state.session_summaries {
+                        summary.is_active = summary.session_id == session_id;
+                    }
+                    state.status_message =
+                        Some(format!("Switched to simulated session {session_id}."));
+                } else {
+                    state.error_message = Some(format!("Unknown simulated session: {session_id}"));
+                }
+            }
             _ => {
                 state.error_message = Some(format!("Unknown node id: {node_id}"));
             }
@@ -919,6 +967,18 @@ fn reduce(mut state: SimulatorState, action: SimulatorAction) -> Reduction {
             state.screen = Screen::Chat;
             state.connection_state = ConnectionState::Connected;
             ensure_session(&mut state, session_id.clone());
+            if state.session_summaries.is_empty() {
+                state.session_summaries = vec![simulated_session_summary(
+                    &session_id,
+                    &session_id,
+                    Some("Connected chat"),
+                    true,
+                )];
+            } else {
+                for summary in &mut state.session_summaries {
+                    summary.is_active = summary.session_id == session_id;
+                }
+            }
             if state.available_models.is_empty() {
                 state.available_models = vec!["gpt-5".to_string(), "claude-sonnet-4".to_string()];
             }
@@ -1464,6 +1524,22 @@ fn apply_history_payload(state: &mut SimulatorState, payload: protocol::HistoryP
     {
         state.sessions.insert(0, payload.session_id.clone());
     }
+    state.session_summaries = if payload.session_summaries.is_empty() {
+        state
+            .sessions
+            .iter()
+            .map(|session_id| {
+                simulated_session_summary(
+                    session_id,
+                    session_id,
+                    None,
+                    session_id == &payload.session_id,
+                )
+            })
+            .collect()
+    } else {
+        payload.session_summaries
+    };
     state.available_models = payload.available_models;
     state.provider_name = payload.provider_name;
     state.model_name = payload.provider_model;
@@ -1599,6 +1675,7 @@ impl FakeJcodeBackend {
                             "session_sim_1".to_string(),
                             "session_sim_2".to_string(),
                         ],
+                        session_summaries: Vec::new(),
                         is_canary: None,
                         was_interrupted: None,
                         total_tokens: None,
@@ -1820,6 +1897,44 @@ fn build_ui_tree(state: &SimulatorState) -> UiTree {
                 });
             }
 
+            let session_children = state
+                .session_summaries
+                .iter()
+                .map(|session| UiNode {
+                    id: format!("chat.session.{}", session.session_id),
+                    role: UiNodeRole::Button,
+                    label: session
+                        .title
+                        .clone()
+                        .unwrap_or_else(|| session.display_name.clone()),
+                    value: Some(session.session_id.clone()),
+                    visible: true,
+                    enabled: true,
+                    focused: session.is_active,
+                    accessibility_label: Some(format!(
+                        "Session {}",
+                        session.title.as_deref().unwrap_or(&session.display_name)
+                    )),
+                    accessibility_value: Some(session.status.clone()),
+                    supported_actions: Vec::new(),
+                    bounds: None,
+                    children: Vec::new(),
+                })
+                .collect();
+            children.push(UiNode {
+                id: "chat.sessions".to_string(),
+                role: UiNodeRole::MessageList,
+                label: "Sessions".to_string(),
+                value: None,
+                visible: true,
+                enabled: true,
+                focused: false,
+                accessibility_label: Some("Sessions".to_string()),
+                accessibility_value: None,
+                supported_actions: Vec::new(),
+                bounds: None,
+                children: session_children,
+            });
             let message_children = state
                 .messages
                 .iter()
