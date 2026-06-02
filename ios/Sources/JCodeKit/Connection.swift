@@ -27,10 +27,11 @@ public actor JCodeConnection {
     private static let keepaliveIntervalNanos: UInt64 = 20_000_000_000
 
     public init(host: String, port: UInt16 = 7643, authToken: String) {
+        let endpoint = GatewayEndpoint(host: host, port: port)
         var components = URLComponents()
         components.scheme = "ws"
-        components.host = host
-        components.port = Int(port)
+        components.host = endpoint.host
+        components.port = Int(endpoint.port)
         components.path = "/ws"
         self.serverURL = components.url!
         self.authToken = authToken
@@ -119,6 +120,19 @@ public actor JCodeConnection {
         let id = nextId
         nextId += 1
         try await send(.softInterrupt(id: id, content: content, urgent: urgent))
+    }
+
+    public func submitApproval(requestId: String, approved: Bool, reason: String? = nil) async throws {
+        let id = nextId
+        nextId += 1
+        try await send(.approvalDecision(id: id, requestId: requestId, approved: approved, reason: reason))
+    }
+
+    public func requestApprovals() async throws -> UInt64 {
+        let id = nextId
+        nextId += 1
+        try await send(.approvalRequests(id: id))
+        return id
     }
 
     // MARK: - Private

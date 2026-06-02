@@ -162,15 +162,75 @@ fn flatten_all_of_schema(mut map: serde_json::Map<String, Value>) -> Value {
     Value::Object(merged)
 }
 
+fn infer_missing_schema_type(map: &mut serde_json::Map<String, Value>) {
+    if map.contains_key("type") {
+        return;
+    }
+
+    if map.contains_key("properties")
+        || map.contains_key("additionalProperties")
+        || map.contains_key("patternProperties")
+    {
+        map.insert("type".to_string(), Value::String("object".to_string()));
+        return;
+    }
+
+    if map.contains_key("items") || map.contains_key("prefixItems") {
+        map.insert("type".to_string(), Value::String("array".to_string()));
+        return;
+    }
+
+    let Some(enum_values) = map.get("enum").and_then(Value::as_array) else {
+        return;
+    };
+    let mut inferred: Option<&str> = None;
+    for value in enum_values {
+        let value_type = match value {
+            Value::Null => "null",
+            Value::Bool(_) => "boolean",
+            Value::Number(number) if number.is_i64() || number.is_u64() => "integer",
+            Value::Number(_) => "number",
+            Value::String(_) => "string",
+            Value::Array(_) => "array",
+            Value::Object(_) => "object",
+        };
+        match inferred {
+            Some(existing) if existing != value_type => return,
+            Some(_) => {}
+            None => inferred = Some(value_type),
+        }
+    }
+
+    if let Some(value_type) = inferred {
+        map.insert("type".to_string(), Value::String(value_type.to_string()));
+    }
+}
+
 pub fn openai_compatible_schema(schema: &Value) -> Value {
     match schema {
         Value::Object(map) => {
             let mut out = serde_json::Map::new();
             for (key, value) in map {
                 let normalized_key = if key == "oneOf" { "anyOf" } else { key };
-                out.insert(normalized_key.to_string(), openai_compatible_schema(value));
+                let normalized_value = if normalized_key == "additionalProperties" {
+                    match value {
+                        Value::String(schema_type) => {
+                            serde_json::json!({ "type": schema_type })
+                        }
+                        _ => openai_compatible_schema(value),
+                    }
+                } else {
+                    openai_compatible_schema(value)
+                };
+                out.insert(normalized_key.to_string(), normalized_value);
             }
-            flatten_all_of_schema(out)
+            match flatten_all_of_schema(out) {
+                Value::Object(mut map) => {
+                    infer_missing_schema_type(&mut map);
+                    Value::Object(map)
+                }
+                other => other,
+            }
         }
         Value::Array(items) => Value::Array(items.iter().map(openai_compatible_schema).collect()),
         _ => schema.clone(),
@@ -502,5 +562,61 @@ mod tests {
             json!("integer")
         );
         assert_eq!(normalized["required"], json!(["file_path"]));
+    }
+
+    #[test]
+    fn openai_compatible_schema_infers_missing_branch_types() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "breakdown_colors": {
+                    "anyOf": [
+                        {
+                            "items": { "type": "string" }
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "display": {
+                    "properties": {
+                        "name": { "type": "string" }
+                    }
+                },
+                "mode": {
+                    "enum": ["light", "dark"]
+                }
+            }
+        });
+
+        let normalized = openai_compatible_schema(&schema);
+
+        assert_eq!(
+            normalized["properties"]["breakdown_colors"]["anyOf"][0]["type"],
+            json!("array")
+        );
+        assert_eq!(normalized["properties"]["display"]["type"], json!("object"));
+        assert_eq!(normalized["properties"]["mode"]["type"], json!("string"));
+    }
+
+    #[test]
+    fn openai_compatible_schema_rewrites_string_additional_properties() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "filters": {
+                    "type": "object",
+                    "additionalProperties": "object"
+                }
+            }
+        });
+
+        let normalized = openai_compatible_schema(&schema);
+
+        assert_eq!(
+            normalized["properties"]["filters"]["additionalProperties"],
+            json!({ "type": "object" })
+        );
     }
 }

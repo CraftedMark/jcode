@@ -8,6 +8,9 @@ import UIKit
 
 @MainActor
 final class AppModel: ObservableObject {
+    let notifications = NotificationBridge()
+    private let mobileCore = MobileCoreBridge()
+
     enum ConnectionState: Equatable {
         case disconnected
         case connecting
@@ -88,7 +91,17 @@ final class AppModel: ObservableObject {
     @Published var sessions: [String] = []
     @Published var serverName: String = ""
     @Published var serverVersion: String = ""
+    @Published var providerName: String = ""
     @Published var modelName: String = ""
+    @Published var gatewayHealthStatus: String = "Not checked"
+    @Published var gatewayHealthVersion: String = ""
+    @Published var gatewayHealthCheckedAt: Date?
+    @Published var connectionTransport: String = "Unknown"
+    @Published var connectionPhase: String = "Unknown"
+    @Published var statusDetail: String = ""
+    @Published var lastDisconnectReason: String = "None"
+    @Published var rustCoreReducerStatus: String = "Not checked"
+    @Published var pendingApprovals: [MobileCoreApproval] = []
 
     private let credentialStore = CredentialStore()
     private var client: JCodeClient?
@@ -133,6 +146,8 @@ final class AppModel: ObservableObject {
     }
 
     func loadSavedServers() async {
+        await notifications.refreshAuthorizationStatus()
+        syncRustCoreDiagnostics()
         let all = await credentialStore.all()
         let creds = all.sorted {
             if $0.host == $1.host {
@@ -193,6 +208,49 @@ final class AppModel: ObservableObject {
             errorMessage = nil
         } catch {
             errorMessage = "Unable to reach server. Verify Tailscale and gateway settings."
+        }
+    }
+
+    func refreshGatewayDiagnostics() async {
+        let targetHost: String
+        let targetPort: UInt16
+
+        if let selectedServer {
+            targetHost = selectedServer.host
+            targetPort = selectedServer.port
+        } else {
+            guard let port = parsePort() else {
+                gatewayHealthStatus = "Port must be a number from 0 to 65535."
+                gatewayHealthVersion = ""
+                gatewayHealthCheckedAt = Date()
+                return
+            }
+            let host = hostInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !host.isEmpty else {
+                gatewayHealthStatus = "Host cannot be empty."
+                gatewayHealthVersion = ""
+                gatewayHealthCheckedAt = Date()
+                return
+            }
+            targetHost = host
+            targetPort = port
+        }
+
+        gatewayHealthStatus = "Checking \(targetHost):\(targetPort)..."
+        gatewayHealthVersion = ""
+        gatewayHealthCheckedAt = Date()
+
+        do {
+            let response = try await PairingClient(host: targetHost, port: targetPort).checkHealth()
+            gatewayHealthStatus = response.gateway
+                ? "Gateway reachable"
+                : "Server reachable, gateway flag missing"
+            gatewayHealthVersion = response.version
+            gatewayHealthCheckedAt = Date()
+        } catch {
+            gatewayHealthStatus = "Gateway unreachable. Check host, port, network, and jcode serve."
+            gatewayHealthVersion = ""
+            gatewayHealthCheckedAt = Date()
         }
     }
 
@@ -305,6 +363,7 @@ final class AppModel: ObservableObject {
         connectionState = .connecting
         shouldAutoReconnect = true
         reconnecting = false
+        dispatchCoreConnectedIntent()
 
         let sessionToResume = activeSessionId.isEmpty ? rememberedSessionId(for: credential) : activeSessionId
 
@@ -322,7 +381,11 @@ final class AppModel: ObservableObject {
         }
         serverName = credential.serverName
         serverVersion = credential.serverVersion
+        providerName = ""
         modelName = ""
+        connectionTransport = "WebSocket"
+        connectionPhase = "Connecting"
+        statusDetail = ""
 
         let newClient = JCodeClient(host: credential.host, port: credential.port, authToken: credential.authToken)
         let delegate = ClientDelegate(model: self, generation: generation)
@@ -335,12 +398,15 @@ final class AppModel: ObservableObject {
             connectionState = .connected
             reconnecting = false
             statusMessage = "Connected to \(credential.host):\(credential.port)"
+            dispatchCore(action: #"{"type":"connected","session_id":"\#(activeSessionId.isEmpty ? "pending" : activeSessionId)"}"#)
+            try? await newClient.refreshApprovals()
         } catch {
             connectionState = .disconnected
             shouldAutoReconnect = false
             reconnecting = false
             clientDelegate = nil
             errorMessage = "Connect failed: \(error.localizedDescription)"
+            dispatchCore(action: #"{"type":"connection_failed","message":\#(error.localizedDescription.jsonEscapedForMobileCore)}"#)
         }
     }
 
@@ -359,6 +425,7 @@ final class AppModel: ObservableObject {
         self.clientDelegate = nil
         connectionState = .disconnected
         statusMessage = "Disconnected"
+        dispatchCore(action: #"{"type":"disconnected","message":null,"should_reconnect":false}"#)
     }
 
     @discardableResult
@@ -383,6 +450,7 @@ final class AppModel: ObservableObject {
         guard !trimmed.isEmpty || !images.isEmpty else {
             return false
         }
+        dispatchCore(action: #"{"type":"set_draft","value":\#(trimmed.jsonEscapedForMobileCore)}"#)
 
         guard let client else {
             errorMessage = "Not connected."
@@ -414,8 +482,10 @@ final class AppModel: ObservableObject {
                 lastAssistantMessageId = assistantPlaceholder.id
 
                 if images.isEmpty {
+                    dispatchCore(action: #"{"type":"tap_node","node_id":"chat.send"}"#)
                     try await client.send(trimmed)
                 } else {
+                    dispatchCore(action: #"{"type":"tap_node","node_id":"chat.send"}"#)
                     try await client.send(trimmed, images: images)
                 }
             }
@@ -434,6 +504,7 @@ final class AppModel: ObservableObject {
             errorMessage = isInterleaving
                 ? "Could not update the running agent: \(error.localizedDescription)"
                 : "Send failed: \(error.localizedDescription)"
+            dispatchCore(action: #"{"type":"connection_failed","message":\#(errorMessage?.jsonEscapedForMobileCore ?? #""""#)}"#)
             return false
         }
     }
@@ -469,8 +540,33 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func submitApproval(_ approval: MobileCoreApproval, approved: Bool) async {
+        guard let client else {
+            errorMessage = "Not connected."
+            return
+        }
+
+        let decisionNode = approved ? "approve" : "deny"
+        let nodeId = "approval.\(approval.id).\(decisionNode)"
+        dispatchCore(action: #"{"type":"tap_node","node_id":\#(nodeId.jsonEscapedForMobileCore)}"#)
+
+        do {
+            try await client.submitApproval(
+                requestId: approval.id,
+                approved: approved,
+                reason: approved ? nil : "Denied from iPhone"
+            )
+            statusMessage = approved ? "Approval sent." : "Approval denied."
+            errorMessage = nil
+            try? await client.refreshApprovals()
+        } catch {
+            errorMessage = "Approval failed: \(error.localizedDescription)"
+        }
+    }
+
     func changeModel(_ model: String) async {
         guard let client else { return }
+        dispatchCore(action: #"{"type":"set_model","model":\#(model.jsonEscapedForMobileCore)}"#)
         do {
             try await client.changeModel(model)
         } catch {
@@ -489,6 +585,7 @@ final class AppModel: ObservableObject {
         }
 
         do {
+            dispatchCore(action: #"{"type":"switch_session","session_id":\#(sessionId.jsonEscapedForMobileCore)}"#)
             try await client.switchSession(sessionId)
             activeSessionId = sessionId
             rememberSessionId(sessionId)
@@ -505,7 +602,10 @@ final class AppModel: ObservableObject {
         sessions = info.allSessions
         serverName = info.serverName ?? "jcode"
         serverVersion = info.serverVersion ?? ""
+        providerName = info.providerName ?? ""
         modelName = info.providerModel ?? ""
+        connectionTransport = info.connectionType ?? "WebSocket"
+        connectionPhase = "Connected"
         availableModels = info.availableModels
     }
 
@@ -640,11 +740,61 @@ final class AppModel: ObservableObject {
         errorMessage = nil
     }
 
+    private func syncRustCoreDiagnostics() {
+        guard mobileCore.isLinked else {
+            rustCoreReducerStatus = "Rust reducer not linked"
+            pendingApprovals = []
+            return
+        }
+        if let snapshot = mobileCore.state() {
+            applyCoreSnapshot(snapshot)
+        } else {
+            rustCoreReducerStatus = "Rust reducer state unavailable"
+        }
+    }
+
+    private func dispatchCore(action: String) {
+        guard mobileCore.isLinked else {
+            rustCoreReducerStatus = "Rust reducer not linked"
+            pendingApprovals = []
+            return
+        }
+        if let snapshot = mobileCore.dispatch(action) {
+            applyCoreSnapshot(snapshot)
+        } else {
+            rustCoreReducerStatus = "Rust reducer dispatch failed"
+        }
+    }
+
+    private func applyCoreSnapshot(_ snapshot: MobileCoreSnapshot) {
+        rustCoreReducerStatus = snapshot.summary
+        pendingApprovals = snapshot.state.pendingApprovals
+        if let provider = snapshot.state.providerName {
+            providerName = provider
+        }
+        if let transport = snapshot.state.connectionTransport {
+            connectionTransport = transport
+        }
+        if let phase = snapshot.state.connectionPhase {
+            connectionPhase = phase
+        }
+        if let detail = snapshot.state.statusDetail {
+            statusDetail = detail
+        }
+    }
+
+    private func dispatchCoreConnectedIntent() {
+        guard let credential = selectedServer else { return }
+        dispatchCore(action: #"{"type":"set_host","value":\#(credential.host.jsonEscapedForMobileCore)}"#)
+        dispatchCore(action: #"{"type":"set_port","value":\#(String(credential.port).jsonEscapedForMobileCore)}"#)
+    }
+
     fileprivate func onConnected(_ info: ServerInfo) {
         connectionState = .connected
         reconnecting = false
         reconnectAttempt = 0
         applyConnectedServerInfo(info)
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"history","session_id":\#(info.sessionId.jsonEscapedForMobileCore),"messages":[],"server_name":\#((info.serverName ?? "jcode").jsonEscapedForMobileCore),"server_version":\#((info.serverVersion ?? "").jsonEscapedForMobileCore),"provider_name":\#((info.providerName ?? "").jsonEscapedForMobileCore),"provider_model":\#((info.providerModel ?? "").jsonEscapedForMobileCore),"connection_type":\#((info.connectionType ?? "WebSocket").jsonEscapedForMobileCore),"available_models":\#(jsonArray(info.availableModels)),"all_sessions":\#(jsonArray(info.allSessions))}}"#)
     }
 
     fileprivate func onDisconnected(error: String?) {
@@ -660,7 +810,13 @@ final class AppModel: ObservableObject {
 
         if let error, !error.isEmpty {
             errorMessage = error
+            lastDisconnectReason = error
+        } else {
+            lastDisconnectReason = statusMessage == "Server reloading. Reconnecting..."
+                ? "Server reload started"
+                : "Closed normally"
         }
+        dispatchCore(action: #"{"type":"disconnected","message":\#((error ?? "").isEmpty ? "null" : error!.jsonEscapedForMobileCore),"should_reconnect":\#(shouldAutoReconnect ? "true" : "false")}"#)
 
         guard shouldAutoReconnect else {
             reconnecting = false
@@ -689,10 +845,12 @@ final class AppModel: ObservableObject {
     fileprivate func onTextDelta(_ text: String) {
         isProcessing = true
         appendAssistantChunk(text)
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"text_delta","text":\#(text.jsonEscapedForMobileCore)}}}"#)
     }
 
     fileprivate func onTextReplace(_ text: String) {
         replaceAssistantText(text)
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"text_replace","text":\#(text.jsonEscapedForMobileCore)}}}"#)
     }
 
     fileprivate func onInterrupted(_ interrupt: InterruptInfo) {
@@ -706,6 +864,11 @@ final class AppModel: ObservableObject {
         }
 
         messages.append(ChatEntry(role: .system, text: interrupt.message))
+        notifications.notify(
+            title: "jcode interrupted",
+            body: interrupt.message,
+            identifier: "jcode.interrupted.\(UUID().uuidString)"
+        )
 
         inFlightTools.removeAll()
         lastToolId = nil
@@ -720,9 +883,57 @@ final class AppModel: ObservableObject {
         }
     }
 
+    fileprivate func onReloading(newSocket _: String?) {
+        isProcessing = false
+        statusMessage = "Server reloading. Reconnecting..."
+        lastDisconnectReason = "Server reload started"
+        errorMessage = nil
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"reloading"}}"#)
+    }
+
+    fileprivate func onReloadProgress(step: String, message: String, success: Bool?, output: String?) {
+        if success == false {
+            errorMessage = message
+        } else {
+            statusMessage = message
+        }
+
+        var fields = [
+            #""type":"reload_progress""#,
+            #""step":\#(step.jsonEscapedForMobileCore)"#,
+            #""message":\#(message.jsonEscapedForMobileCore)"#,
+        ]
+        if let success {
+            fields.append(#""success":\#(success ? "true" : "false")"#)
+        }
+        if let output {
+            fields.append(#""output":\#(output.jsonEscapedForMobileCore)"#)
+        }
+        dispatchCore(action: #"{"type":"apply_server_event","event":{\#(fields.joined(separator: ","))}}"#)
+    }
+
+    fileprivate func onServerNotification(_ notification: ServerNotification) {
+        statusMessage = notification.message
+        notifications.notify(
+            title: "jcode notification",
+            body: "Open jcode to review the latest server notification.",
+            identifier: "jcode.server-notification.\(UUID().uuidString)"
+        )
+
+        let fields = [
+            #""type":"notification""#,
+            #""from_session":\#(notification.fromSession.jsonEscapedForMobileCore)"#,
+            #""from_name":\#(notification.fromName?.jsonEscapedForMobileCore ?? "null")"#,
+            #""notification_type":\#(notification.notificationType.mobileCoreJson)"#,
+            #""message":\#(notification.message.jsonEscapedForMobileCore)"#,
+        ]
+        dispatchCore(action: #"{"type":"apply_server_event","event":{\#(fields.joined(separator: ","))}}"#)
+    }
+
     fileprivate func onToolStart(_ tool: ToolCallInfo) {
         isProcessing = true
         attachTool(tool)
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"tool_start","id":\#(tool.id.jsonEscapedForMobileCore),"name":\#(tool.name.jsonEscapedForMobileCore)}}}"#)
     }
 
     fileprivate func onToolInput(_ delta: String) {
@@ -733,12 +944,14 @@ final class AppModel: ObservableObject {
             tool.input += delta
             tool.state = .streaming
         }
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"tool_input","delta":\#(delta.jsonEscapedForMobileCore)}}}"#)
     }
 
     fileprivate func onToolExec(id: String, name _: String) {
         updateLatestTool(id) { tool in
             tool.state = .executing
         }
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"tool_exec","id":\#(id.jsonEscapedForMobileCore),"name":"tool"}}"#)
     }
 
     fileprivate func onToolDone(id: String, name _: String, output: String, error: String?) {
@@ -747,6 +960,7 @@ final class AppModel: ObservableObject {
             tool.error = error
             tool.state = error == nil ? .done : .failed
         }
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"tool_done","id":\#(id.jsonEscapedForMobileCore),"name":"tool","output":\#(output.jsonEscapedForMobileCore),"error":\#(error?.jsonEscapedForMobileCore ?? "null")}}}"#)
     }
 
     fileprivate func onTurnDone(id _: UInt64) {
@@ -757,20 +971,97 @@ final class AppModel: ObservableObject {
         lastAssistantIndex = nil
         toolMessageIndex.removeAll()
         toolSubIndex.removeAll()
+        notifications.notify(
+            title: "jcode finished",
+            body: activeSessionId.isEmpty ? "The current run finished." : "Session \(activeSessionId) finished.",
+            identifier: "jcode.done.\(UUID().uuidString)"
+        )
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"done","id":0}}"#)
     }
 
     fileprivate func onServerError(id _: UInt64, message: String) {
         errorMessage = message
+        notifications.notify(
+            title: "jcode needs attention",
+            body: message,
+            identifier: "jcode.error.\(UUID().uuidString)"
+        )
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"error","id":0,"message":\#(message.jsonEscapedForMobileCore)}}}"#)
     }
 
-    fileprivate func onModelChanged(model: String, provider _: String?) {
+    fileprivate func onModelChanged(model: String, provider: String?) {
+        if let provider {
+            providerName = provider
+        }
         modelName = model
         statusMessage = "Model: \(model)"
+        let providerField = provider.map { #","provider_name":\#($0.jsonEscapedForMobileCore)"# } ?? ""
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"model_changed","id":0,"model":\#(model.jsonEscapedForMobileCore)\#(providerField)}}"#)
+    }
+
+    fileprivate func onAvailableModelsUpdated(provider: String?, model: String?, models: [String]) {
+        if let provider {
+            providerName = provider
+        }
+        if let model {
+            modelName = model
+        }
+        availableModels = models
+
+        var fields = [
+            #""type":"available_models_updated""#,
+            #""available_models":\#(jsonArray(models))"#,
+        ]
+        if let provider {
+            fields.append(#""provider_name":\#(provider.jsonEscapedForMobileCore)"#)
+        }
+        if let model {
+            fields.append(#""provider_model":\#(model.jsonEscapedForMobileCore)"#)
+        }
+        dispatchCore(action: #"{"type":"apply_server_event","event":{\#(fields.joined(separator: ","))}}"#)
+    }
+
+    fileprivate func onConnectionType(_ connection: String) {
+        connectionTransport = connection
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"connection_type","connection":\#(connection.jsonEscapedForMobileCore)}}}"#)
+    }
+
+    fileprivate func onConnectionPhase(_ phase: String) {
+        connectionPhase = phase
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"connection_phase","phase":\#(phase.jsonEscapedForMobileCore)}}}"#)
+    }
+
+    fileprivate func onStatusDetail(_ detail: String) {
+        statusDetail = detail
+        statusMessage = detail
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"status_detail","detail":\#(detail.jsonEscapedForMobileCore)}}}"#)
     }
 
     fileprivate func onHistory(_ history: [HistoryMessage]) {
         applyHistory(history)
+        let messageJson = history.map { item in
+            #"{"role":\#(item.role.jsonEscapedForMobileCore),"content":\#(item.content.jsonEscapedForMobileCore)}"#
+        }.joined(separator: ",")
+        dispatchCore(action: #"{"type":"apply_server_event","event":{"type":"history","session_id":\#(activeSessionId.jsonEscapedForMobileCore),"messages":[\#(messageJson)],"provider_name":\#(providerName.jsonEscapedForMobileCore),"provider_model":\#(modelName.jsonEscapedForMobileCore),"connection_type":\#(connectionTransport.jsonEscapedForMobileCore),"available_models":\#(jsonArray(availableModels)),"all_sessions":\#(jsonArray(sessions))}}"#)
     }
+
+    fileprivate func onApprovals(_ approvals: [ApprovalRequestPayload]) {
+        pendingApprovals = approvals.map(MobileCoreApproval.init(payload:))
+        for approval in approvals {
+            let risk = approval.risk.lowercased()
+            let coreRisk: String
+            switch risk {
+            case "high": coreRisk = "high"
+            case "low": coreRisk = "low"
+            default: coreRisk = "medium"
+            }
+            dispatchCore(action: #"{"type":"approval_requested","request":{"id":\#(approval.id.jsonEscapedForMobileCore),"command_summary":\#(approval.commandSummary.jsonEscapedForMobileCore),"risk":"\#(coreRisk)"}}"#)
+        }
+    }
+}
+
+private func jsonArray(_ values: [String]) -> String {
+    "[" + values.map(\.jsonEscapedForMobileCore).joined(separator: ",") + "]"
 }
 
 @MainActor
@@ -847,6 +1138,26 @@ private final class ClientDelegate: JCodeClientDelegate {
         self.model.onModelChanged(model: model, provider: provider)
     }
 
+    func clientDidUpdateAvailableModels(provider: String?, model: String?, models: [String]) {
+        guard guardCurrent() else { return }
+        self.model.onAvailableModelsUpdated(provider: provider, model: model, models: models)
+    }
+
+    func clientDidUpdateConnectionType(_ connection: String) {
+        guard guardCurrent() else { return }
+        model.onConnectionType(connection)
+    }
+
+    func clientDidUpdateConnectionPhase(_ phase: String) {
+        guard guardCurrent() else { return }
+        model.onConnectionPhase(phase)
+    }
+
+    func clientDidUpdateStatusDetail(_ detail: String) {
+        guard guardCurrent() else { return }
+        model.onStatusDetail(detail)
+    }
+
     func clientDidReceiveHistory(messages: [HistoryMessage]) {
         guard guardCurrent() else { return }
         model.onHistory(messages)
@@ -860,5 +1171,59 @@ private final class ClientDelegate: JCodeClientDelegate {
     func clientDidInjectSoftInterrupt(_ info: SoftInterruptInjectionInfo) {
         guard guardCurrent() else { return }
         model.onSoftInterruptInjected(info)
+    }
+
+    func clientDidUpdateApprovals(_ approvals: [ApprovalRequestPayload]) {
+        guard guardCurrent() else { return }
+        model.onApprovals(approvals)
+    }
+
+    func clientDidStartReload(newSocket: String?) {
+        guard guardCurrent() else { return }
+        model.onReloading(newSocket: newSocket)
+    }
+
+    func clientDidUpdateReloadProgress(step: String, message: String, success: Bool?, output: String?) {
+        guard guardCurrent() else { return }
+        model.onReloadProgress(step: step, message: message, success: success, output: output)
+    }
+
+    func clientDidReceiveNotification(_ notification: ServerNotification) {
+        guard guardCurrent() else { return }
+        model.onServerNotification(notification)
+    }
+}
+
+extension NotificationType {
+    var mobileCoreJson: String {
+        switch self {
+        case .fileConflict(let path, let operation):
+            return [
+                #""kind":"file_conflict""#,
+                #""path":\#(path.jsonEscapedForMobileCore)"#,
+                #""operation":\#(operation.jsonEscapedForMobileCore)"#,
+            ].joined(prefix: "{", separator: ",", suffix: "}")
+        case .sharedContext(let key, let value):
+            return [
+                #""kind":"shared_context""#,
+                #""key":\#(key.jsonEscapedForMobileCore)"#,
+                #""value":\#(value.jsonEscapedForMobileCore)"#,
+            ].joined(prefix: "{", separator: ",", suffix: "}")
+        case .message(let scope, let channel):
+            var fields = [#""kind":"message""#]
+            if let scope {
+                fields.append(#""scope":\#(scope.jsonEscapedForMobileCore)"#)
+            }
+            if let channel {
+                fields.append(#""channel":\#(channel.jsonEscapedForMobileCore)"#)
+            }
+            return fields.joined(prefix: "{", separator: ",", suffix: "}")
+        }
+    }
+}
+
+private extension Array where Element == String {
+    func joined(prefix: String, separator: String, suffix: String) -> String {
+        prefix + joined(separator: separator) + suffix
     }
 }

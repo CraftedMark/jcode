@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "2026.01.results-v1",
+  "effectId": "01KSZKR333XRMPQ2YG6SPCKZFK",
+  "taskId": "jcode-mobile-prd-verify",
+  "invocationKey": "local/jcode-mobile-prd-finish:S000003:jcode-mobile-prd-verify",
+  "status": "ok",
+  "result": {
+    "command": "cargo test -p jcode-mobile-core && cargo test -p jcode-mobile-sim && cargo check -p jcode-mobile-core -p jcode-mobile-sim && swift run --package-path ios JCodeKitTests && git diff --check",
+    "success": true,
+    "summary": "Verification chain passed: jcode-mobile-core 62 tests, jcode-mobile-sim 3 tests, cargo check passed, JCodeKitTests 166 assertions, git diff --check clean."
+  },
+  "startedAt": "2026-05-31T18:11:59.188Z",
+  "finishedAt": "2026-05-31T18:11:59.188Z",
+  "value": {
+    "command": "cargo test -p jcode-mobile-core && cargo test -p jcode-mobile-sim && cargo check -p jcode-mobile-core -p jcode-mobile-sim && swift run --package-path ios JCodeKitTests && git diff --check",
+    "success": true,
+    "summary": "Verification chain passed: jcode-mobile-core 62 tests, jcode-mobile-sim 3 tests, cargo check passed, JCodeKitTests 166 assertions, git diff --check clean."
+  }
+}

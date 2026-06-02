@@ -1,0 +1,15 @@
+{
+  "runId": "01KSYCW9513TC0Q892T6FE5B9B",
+  "request": "local/jcode-mobile-prd-finish",
+  "processId": "local/jcode-mobile-prd-finish",
+  "harness": "codex",
+  "entrypoint": {
+    "importPath": "../../processes/jcode-mobile-prd-finish.js",
+    "exportName": "process"
+  },
+  "processPath": "../../processes/jcode-mobile-prd-finish.js",
+  "layoutVersion": "2026.01-storage-preview",
+  "createdAt": "2026-05-31T06:52:25.146Z",
+  "prompt": "Finish the JCode Mobile PRD and whatever implementation/docs/tests come from it",
+  "completionProof": "95f54ab5d99b718daa3f39f7c4be371e"
+}

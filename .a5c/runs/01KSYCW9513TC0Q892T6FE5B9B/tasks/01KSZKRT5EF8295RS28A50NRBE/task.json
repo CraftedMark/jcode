@@ -1,0 +1,174 @@
+{
+  "agent": {
+    "name": "generalist",
+    "outputSchema": {
+      "properties": {
+        "filesChanged": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "success",
+        "filesChanged",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "prompt": {
+      "context": {
+        "audit": {
+          "alreadyDone": [
+            "Rust mobile core already owns pairing validation, chat send/streaming, tool-call state, session state, model change confirmation, reconnect intent/effects, reload status handling, approval state/effects, notification event surfacing, semantic tree scenarios, replay traces, and simulator automation.",
+            "Swift iOS host already links the Rust FFI bridge, dispatches many server events into the Rust reducer, includes a Settings diagnostics section, notification authorization/status plumbing, QR/pairing repair, sessions, models, and gateway health checks.",
+            "The PRD open gaps are stale for M1/M2/M4 in several places; the real local gap is not first implementation but reconciling docs with verified behavior and tightening diagnostics/reconnect state so future work targets APNs/Live Activities/physical-device beta accurately."
+          ],
+          "files": [
+            "crates/jcode-mobile-core/src/lib.rs",
+            "crates/jcode-mobile-core/src/lib_tests.rs",
+            "ios/Sources/JCodeMobile/AppModel.swift",
+            "ios/Sources/JCodeMobile/ContentView.swift",
+            "docs/JCODE_MOBILE_PRD.md",
+            ".context/jcode-mobile-prd-handoff.md"
+          ],
+          "selectedSlice": "Tighten the locally-verifiable diagnostics/reconnect slice and update the PRD/handoff so M1 shared-core parity is no longer treated as open. Specifically: add focused tests for server event parity where missing, ensure diagnostics do not overclaim APNs/physical-device work, update PRD milestones/current-state/next-slice, and record handoff evidence under .context.",
+          "verificationCommands": [
+            "cargo test -p jcode-mobile-core",
+            "cargo test -p jcode-mobile-sim",
+            "cargo check -p jcode-mobile-core -p jcode-mobile-sim",
+            "swift run --package-path ios JCodeKitTests",
+            "git diff --check"
+          ]
+        },
+        "implementation": {
+          "filesChanged": [
+            "crates/jcode-mobile-core/src/protocol.rs",
+            "crates/jcode-mobile-core/src/lib.rs",
+            "crates/jcode-mobile-core/src/lib_tests.rs",
+            "ios/Sources/JCodeKit/Protocol.swift",
+            "ios/Sources/JCodeKit/JCodeClient.swift",
+            "ios/Sources/JCodeMobile/MobileCoreBridge.swift",
+            "ios/Sources/JCodeMobile/AppModel.swift",
+            "ios/Sources/JCodeMobile/ContentView.swift",
+            "docs/JCODE_MOBILE_PRD.md",
+            ".context/jcode-mobile-prd-handoff.md"
+          ],
+          "risks": [
+            "Physical iPhone/live gateway acceptance still pending.",
+            "Generic simulator build still requires an x86_64 simulator slice in JCodeMobileCore.xcframework or an arm64-only build setting."
+          ],
+          "success": true,
+          "summary": "Implemented shared-core mobile diagnostics/model/reconnect parity for current server events; updated Swift bridge and Settings diagnostics; refreshed PRD and local handoff.",
+          "verification": [
+            "cargo test -p jcode-mobile-core",
+            "cargo test -p jcode-mobile-sim",
+            "cargo check -p jcode-mobile-core -p jcode-mobile-sim",
+            "swift run --package-path ios JCodeKitTests",
+            "git diff --check",
+            "xcodebuild -project ios/JCodeMobile.xcodeproj -scheme JCodeMobile -destination generic/platform=iOS Simulator ARCHS=arm64 ONLY_ACTIVE_ARCH=YES build"
+          ]
+        },
+        "prdPath": "docs/JCODE_MOBILE_PRD.md",
+        "remediation": null,
+        "verification": {
+          "command": "cargo test -p jcode-mobile-core && cargo test -p jcode-mobile-sim && cargo check -p jcode-mobile-core -p jcode-mobile-sim && swift run --package-path ios JCodeKitTests && git diff --check",
+          "success": true,
+          "summary": "Verification chain passed: jcode-mobile-core 62 tests, jcode-mobile-sim 3 tests, cargo check passed, JCodeKitTests 166 assertions, git diff --check clean."
+        }
+      },
+      "instructions": [
+        "Update PRD status, current state, milestones, next slice, and verification evidence.",
+        "Keep wording concrete and distinguish implemented, verified, planned, and blocked items.",
+        "Record a concise handoff under .context for other agents.",
+        "Do not overclaim physical-device or APNs verification if not actually run."
+      ],
+      "outputFormat": "JSON",
+      "role": "technical product engineer",
+      "task": "Update the PRD and handoff artifacts to match the code that now exists."
+    }
+  },
+  "io": {
+    "inputJsonPath": "tasks/01KSZKRT5EF8295RS28A50NRBE/input.json",
+    "outputJsonPath": "tasks/01KSZKRT5EF8295RS28A50NRBE/output.json"
+  },
+  "kind": "agent",
+  "labels": [
+    "docs",
+    "jcode",
+    "mobile"
+  ],
+  "title": "Update JCode Mobile PRD and handoff notes",
+  "schemaVersion": "2026.01.tasks-v1",
+  "effectId": "01KSZKRT5EF8295RS28A50NRBE",
+  "taskId": "jcode-mobile-prd-docs",
+  "invocationKey": "local/jcode-mobile-prd-finish:S000004:jcode-mobile-prd-docs",
+  "stepId": "S000004",
+  "inputs": {
+    "audit": {
+      "alreadyDone": [
+        "Rust mobile core already owns pairing validation, chat send/streaming, tool-call state, session state, model change confirmation, reconnect intent/effects, reload status handling, approval state/effects, notification event surfacing, semantic tree scenarios, replay traces, and simulator automation.",
+        "Swift iOS host already links the Rust FFI bridge, dispatches many server events into the Rust reducer, includes a Settings diagnostics section, notification authorization/status plumbing, QR/pairing repair, sessions, models, and gateway health checks.",
+        "The PRD open gaps are stale for M1/M2/M4 in several places; the real local gap is not first implementation but reconciling docs with verified behavior and tightening diagnostics/reconnect state so future work targets APNs/Live Activities/physical-device beta accurately."
+      ],
+      "files": [
+        "crates/jcode-mobile-core/src/lib.rs",
+        "crates/jcode-mobile-core/src/lib_tests.rs",
+        "ios/Sources/JCodeMobile/AppModel.swift",
+        "ios/Sources/JCodeMobile/ContentView.swift",
+        "docs/JCODE_MOBILE_PRD.md",
+        ".context/jcode-mobile-prd-handoff.md"
+      ],
+      "selectedSlice": "Tighten the locally-verifiable diagnostics/reconnect slice and update the PRD/handoff so M1 shared-core parity is no longer treated as open. Specifically: add focused tests for server event parity where missing, ensure diagnostics do not overclaim APNs/physical-device work, update PRD milestones/current-state/next-slice, and record handoff evidence under .context.",
+      "verificationCommands": [
+        "cargo test -p jcode-mobile-core",
+        "cargo test -p jcode-mobile-sim",
+        "cargo check -p jcode-mobile-core -p jcode-mobile-sim",
+        "swift run --package-path ios JCodeKitTests",
+        "git diff --check"
+      ]
+    },
+    "implementation": {
+      "filesChanged": [
+        "crates/jcode-mobile-core/src/protocol.rs",
+        "crates/jcode-mobile-core/src/lib.rs",
+        "crates/jcode-mobile-core/src/lib_tests.rs",
+        "ios/Sources/JCodeKit/Protocol.swift",
+        "ios/Sources/JCodeKit/JCodeClient.swift",
+        "ios/Sources/JCodeMobile/MobileCoreBridge.swift",
+        "ios/Sources/JCodeMobile/AppModel.swift",
+        "ios/Sources/JCodeMobile/ContentView.swift",
+        "docs/JCODE_MOBILE_PRD.md",
+        ".context/jcode-mobile-prd-handoff.md"
+      ],
+      "risks": [
+        "Physical iPhone/live gateway acceptance still pending.",
+        "Generic simulator build still requires an x86_64 simulator slice in JCodeMobileCore.xcframework or an arm64-only build setting."
+      ],
+      "success": true,
+      "summary": "Implemented shared-core mobile diagnostics/model/reconnect parity for current server events; updated Swift bridge and Settings diagnostics; refreshed PRD and local handoff.",
+      "verification": [
+        "cargo test -p jcode-mobile-core",
+        "cargo test -p jcode-mobile-sim",
+        "cargo check -p jcode-mobile-core -p jcode-mobile-sim",
+        "swift run --package-path ios JCodeKitTests",
+        "git diff --check",
+        "xcodebuild -project ios/JCodeMobile.xcodeproj -scheme JCodeMobile -destination generic/platform=iOS Simulator ARCHS=arm64 ONLY_ACTIVE_ARCH=YES build"
+      ]
+    },
+    "prdPath": "docs/JCODE_MOBILE_PRD.md",
+    "remediation": null,
+    "verification": {
+      "command": "cargo test -p jcode-mobile-core && cargo test -p jcode-mobile-sim && cargo check -p jcode-mobile-core -p jcode-mobile-sim && swift run --package-path ios JCodeKitTests && git diff --check",
+      "success": true,
+      "summary": "Verification chain passed: jcode-mobile-core 62 tests, jcode-mobile-sim 3 tests, cargo check passed, JCodeKitTests 166 assertions, git diff --check clean."
+    }
+  }
+}

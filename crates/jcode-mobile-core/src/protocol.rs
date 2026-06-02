@@ -85,6 +85,16 @@ pub enum MobileRequest {
         request_id: String,
         input: String,
     },
+    ApprovalDecision {
+        id: u64,
+        request_id: String,
+        approved: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+    ApprovalRequests {
+        id: u64,
+    },
 }
 
 impl MobileRequest {
@@ -106,7 +116,9 @@ impl MobileRequest {
             | Self::CancelSoftInterrupts { id }
             | Self::BackgroundTool { id }
             | Self::Split { id }
-            | Self::StdinResponse { id, .. } => *id,
+            | Self::StdinResponse { id, .. }
+            | Self::ApprovalDecision { id, .. }
+            | Self::ApprovalRequests { id } => *id,
         }
     }
 
@@ -245,7 +257,7 @@ fn normalize_gateway_host(input: &str) -> anyhow::Result<String> {
 }
 
 /// Events received by the mobile app from the jcode gateway.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MobileServerEvent {
     Ack {
@@ -286,6 +298,15 @@ pub enum MobileServerEvent {
     },
     UpstreamProvider {
         provider: String,
+    },
+    ConnectionType {
+        connection: String,
+    },
+    ConnectionPhase {
+        phase: String,
+    },
+    StatusDetail {
+        detail: String,
     },
     Done {
         id: u64,
@@ -333,6 +354,14 @@ pub enum MobileServerEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+    AvailableModelsUpdated {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_model: Option<String>,
+        #[serde(default)]
+        available_models: Vec<String>,
+    },
     Notification(MobileNotification),
     SwarmStatus {
         members: Vec<SwarmMemberStatus>,
@@ -369,6 +398,23 @@ pub enum MobileServerEvent {
         is_password: bool,
         tool_call_id: String,
     },
+    ApprovalRequests {
+        id: u64,
+        requests: Vec<MobileApprovalRequest>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MobileApprovalRequest {
+    pub id: String,
+    pub command_summary: String,
+    pub risk: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<u64>,
 }
 
 /// Lossless event envelope for preserving unknown gateway events in simulator/fake-backend work.
@@ -436,8 +482,11 @@ pub struct HistoryToolData {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MobileNotification {
-    pub title: String,
-    pub body: String,
+    pub from_session: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_name: Option<String>,
+    pub notification_type: Value,
+    pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub level: Option<String>,
 }
@@ -546,6 +595,134 @@ mod tests {
         assert_eq!(
             value,
             json!({"type":"rename_session","id":12,"title":"Release planning"})
+        );
+    }
+
+    #[test]
+    fn mobile_approval_decision_request_matches_gateway_json_shape() {
+        let request = MobileRequest::ApprovalDecision {
+            id: 77,
+            request_id: "req_permission_1".to_string(),
+            approved: true,
+            reason: None,
+        };
+        let value = serde_json::to_value(request);
+        assert!(value.is_ok(), "request should serialize");
+        let Ok(value) = value else {
+            return;
+        };
+        assert_eq!(
+            value,
+            json!({"type":"approval_decision","id":77,"request_id":"req_permission_1","approved":true})
+        );
+    }
+
+    #[test]
+    fn mobile_approval_requests_request_matches_gateway_json_shape() {
+        let request = MobileRequest::ApprovalRequests { id: 78 };
+        let value = serde_json::to_value(request);
+        assert!(value.is_ok(), "request should serialize");
+        let Ok(value) = value else {
+            return;
+        };
+        assert_eq!(value, json!({"type":"approval_requests","id":78}));
+    }
+
+    #[test]
+    fn mobile_approval_requests_event_decodes() {
+        let event: Result<MobileServerEvent, _> = serde_json::from_value(json!({
+            "type":"approval_requests",
+            "id":78,
+            "requests":[{
+                "id":"req_permission_1",
+                "command_summary":"bash: cargo test",
+                "risk":"high",
+                "workspace":"/tmp/project",
+                "created_at":"2026-05-24T00:00:00Z",
+                "timeout_seconds":300
+            }]
+        }));
+        assert!(event.is_ok(), "approval_requests event should decode");
+        let Ok(MobileServerEvent::ApprovalRequests { id, requests }) = event else {
+            return;
+        };
+        assert_eq!(id, 78);
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].risk, "high");
+    }
+
+    #[test]
+    fn mobile_connection_diagnostic_events_decode() {
+        let connection_type: Result<MobileServerEvent, _> =
+            serde_json::from_value(json!({"type":"connection_type","connection":"websocket"}));
+        assert_eq!(
+            connection_type.expect("connection_type should decode"),
+            MobileServerEvent::ConnectionType {
+                connection: "websocket".to_string()
+            }
+        );
+
+        let connection_phase: Result<MobileServerEvent, _> =
+            serde_json::from_value(json!({"type":"connection_phase","phase":"connecting"}));
+        assert_eq!(
+            connection_phase.expect("connection_phase should decode"),
+            MobileServerEvent::ConnectionPhase {
+                phase: "connecting".to_string()
+            }
+        );
+
+        let status_detail: Result<MobileServerEvent, _> =
+            serde_json::from_value(json!({"type":"status_detail","detail":"using persistent websocket"}));
+        assert_eq!(
+            status_detail.expect("status_detail should decode"),
+            MobileServerEvent::StatusDetail {
+                detail: "using persistent websocket".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn mobile_available_models_updated_event_decodes() {
+        let event: Result<MobileServerEvent, _> = serde_json::from_value(json!({
+            "type":"available_models_updated",
+            "provider_name":"openai",
+            "provider_model":"gpt-5",
+            "available_models":["gpt-5","claude-sonnet-4"],
+            "available_model_routes":[{"ignored":"by-mobile"}]
+        }));
+        assert_eq!(
+            event.expect("available_models_updated should decode"),
+            MobileServerEvent::AvailableModelsUpdated {
+                provider_name: Some("openai".to_string()),
+                provider_model: Some("gpt-5".to_string()),
+                available_models: vec!["gpt-5".to_string(), "claude-sonnet-4".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn mobile_notification_event_decodes_gateway_shape() {
+        let event: Result<MobileServerEvent, _> = serde_json::from_value(json!({
+            "type":"notification",
+            "from_session":"sess_a",
+            "from_name":"fox",
+            "notification_type":{
+                "kind":"file_conflict",
+                "path":"src/main.rs",
+                "operation":"wrote"
+            },
+            "message":"fox edited src/main.rs"
+        }));
+        assert!(event.is_ok(), "notification event should decode");
+        let Ok(MobileServerEvent::Notification(notification)) = event else {
+            return;
+        };
+        assert_eq!(notification.from_session, "sess_a");
+        assert_eq!(notification.from_name.as_deref(), Some("fox"));
+        assert_eq!(notification.message, "fox edited src/main.rs");
+        assert_eq!(
+            notification.notification_type,
+            json!({"kind":"file_conflict","path":"src/main.rs","operation":"wrote"})
         );
     }
 

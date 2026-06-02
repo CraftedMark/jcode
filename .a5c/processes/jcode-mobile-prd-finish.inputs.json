@@ -1,0 +1,4 @@
+{
+  "prdPath": "docs/JCODE_MOBILE_PRD.md",
+  "targetSlice": "Finish the next bounded JCode Mobile PRD work by reconciling stale PRD state against the current Rust mobile core, simulator, Swift bridge, diagnostics, and implement the highest-leverage remaining gap that can be verified locally without overclaiming APNs or physical-device acceptance."
+}

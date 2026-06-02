@@ -100,9 +100,17 @@ public protocol JCodeClientDelegate: AnyObject {
     func clientDidReceiveError(id: UInt64, message: String)
     func clientDidUpdateTokens(_ update: TokenUpdate)
     func clientDidChangeModel(model: String, provider: String?)
+    func clientDidUpdateAvailableModels(provider: String?, model: String?, models: [String])
+    func clientDidUpdateConnectionType(_ connection: String)
+    func clientDidUpdateConnectionPhase(_ phase: String)
+    func clientDidUpdateStatusDetail(_ detail: String)
     func clientDidReceiveHistory(messages: [HistoryMessage])
     func clientDidInterrupt(_ interrupt: InterruptInfo)
     func clientDidInjectSoftInterrupt(_ info: SoftInterruptInjectionInfo)
+    func clientDidUpdateApprovals(_ approvals: [ApprovalRequestPayload])
+    func clientDidStartReload(newSocket: String?)
+    func clientDidUpdateReloadProgress(step: String, message: String, success: Bool?, output: String?)
+    func clientDidReceiveNotification(_ notification: ServerNotification)
 }
 
 @MainActor
@@ -111,9 +119,17 @@ public extension JCodeClientDelegate {
     func clientDidReceiveToolInput(_ delta: String) {}
     func clientDidUpdateTokens(_ update: TokenUpdate) {}
     func clientDidChangeModel(model: String, provider: String?) {}
+    func clientDidUpdateAvailableModels(provider: String?, model: String?, models: [String]) {}
+    func clientDidUpdateConnectionType(_ connection: String) {}
+    func clientDidUpdateConnectionPhase(_ phase: String) {}
+    func clientDidUpdateStatusDetail(_ detail: String) {}
     func clientDidReceiveHistory(messages: [HistoryMessage]) {}
     func clientDidInterrupt(_ interrupt: InterruptInfo) {}
     func clientDidInjectSoftInterrupt(_ info: SoftInterruptInjectionInfo) {}
+    func clientDidUpdateApprovals(_ approvals: [ApprovalRequestPayload]) {}
+    func clientDidStartReload(newSocket: String?) {}
+    func clientDidUpdateReloadProgress(step: String, message: String, success: Bool?, output: String?) {}
+    func clientDidReceiveNotification(_ notification: ServerNotification) {}
 }
 
 public actor JCodeClient {
@@ -174,6 +190,14 @@ public actor JCodeClient {
 
     public func changeModel(_ model: String) async throws {
         try await connection.setModel(model)
+    }
+
+    public func submitApproval(requestId: String, approved: Bool, reason: String? = nil) async throws {
+        try await connection.submitApproval(requestId: requestId, approved: approved, reason: reason)
+    }
+
+    public func refreshApprovals() async throws {
+        let _ = try await connection.requestApprovals()
     }
 
     public func refreshHistory() async throws {
@@ -270,6 +294,28 @@ public actor JCodeClient {
             if let p = provider { serverInfo.providerName = p }
             await callDelegate { $0.clientDidChangeModel(model: model, provider: provider) }
 
+        case .availableModelsUpdated(let providerName, let providerModel, let models):
+            if let providerName { serverInfo.providerName = providerName }
+            if let providerModel { serverInfo.providerModel = providerModel }
+            serverInfo.availableModels = models
+            await callDelegate {
+                $0.clientDidUpdateAvailableModels(
+                    provider: providerName,
+                    model: providerModel,
+                    models: models
+                )
+            }
+
+        case .connectionType(let connection):
+            serverInfo.connectionType = connection
+            await callDelegate { $0.clientDidUpdateConnectionType(connection) }
+
+        case .connectionPhase(let phase):
+            await callDelegate { $0.clientDidUpdateConnectionPhase(phase) }
+
+        case .statusDetail(let detail):
+            await callDelegate { $0.clientDidUpdateStatusDetail(detail) }
+
         case .upstreamProvider:
             break
 
@@ -280,8 +326,27 @@ public actor JCodeClient {
             let info = SoftInterruptInjectionInfo(content: content, point: point, toolsSkipped: toolsSkipped)
             await callDelegate { $0.clientDidInjectSoftInterrupt(info) }
 
-        case .ack, .pong, .state, .reloading, .reloadProgress,
-             .notification, .swarmStatus, .mcpStatus,
+        case .approvalRequests(_, let requests):
+            await callDelegate { $0.clientDidUpdateApprovals(requests) }
+
+        case .reloading(let newSocket):
+            await callDelegate { $0.clientDidStartReload(newSocket: newSocket) }
+
+        case .reloadProgress(let step, let message, let success, let output):
+            await callDelegate {
+                $0.clientDidUpdateReloadProgress(
+                    step: step,
+                    message: message,
+                    success: success,
+                    output: output
+                )
+            }
+
+        case .notification(let notification):
+            await callDelegate { $0.clientDidReceiveNotification(notification) }
+
+        case .ack, .pong, .state,
+             .swarmStatus, .mcpStatus,
              .memoryInjected,
              .splitResponse, .compactResult, .stdinRequest, .unknown:
             break

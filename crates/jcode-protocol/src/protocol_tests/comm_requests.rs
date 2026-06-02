@@ -67,6 +67,79 @@ fn test_stdin_response_deserialize_from_json() -> Result<()> {
 }
 
 #[test]
+fn test_approval_decision_roundtrip() -> Result<()> {
+    let req = Request::ApprovalDecision {
+        id: 77,
+        request_id: "req_permission_1".to_string(),
+        approved: false,
+        reason: Some("Not safe from phone".to_string()),
+    };
+    let json = serde_json::to_string(&req)?;
+    assert!(json.contains("\"type\":\"approval_decision\""));
+    assert!(json.contains("\"request_id\":\"req_permission_1\""));
+    assert!(json.contains("\"approved\":false"));
+    assert!(json.contains("\"reason\":\"Not safe from phone\""));
+
+    let decoded = parse_request_json(&json)?;
+    assert_eq!(decoded.id(), 77);
+    let Request::ApprovalDecision {
+        request_id,
+        approved,
+        reason,
+        ..
+    } = decoded
+    else {
+        return Err(anyhow!("expected ApprovalDecision"));
+    };
+    assert_eq!(request_id, "req_permission_1");
+    assert!(!approved);
+    assert_eq!(reason.as_deref(), Some("Not safe from phone"));
+    Ok(())
+}
+
+#[test]
+fn test_approval_requests_roundtrip() -> Result<()> {
+    let req = Request::ApprovalRequests { id: 78 };
+    let json = serde_json::to_string(&req)?;
+    assert!(json.contains("\"type\":\"approval_requests\""));
+
+    let decoded = parse_request_json(&json)?;
+    assert_eq!(decoded.id(), 78);
+    let Request::ApprovalRequests { .. } = decoded else {
+        return Err(anyhow!("expected ApprovalRequests"));
+    };
+    Ok(())
+}
+
+#[test]
+fn test_approval_requests_event_roundtrip() -> Result<()> {
+    let event = ServerEvent::ApprovalRequests {
+        id: 78,
+        requests: vec![ApprovalRequestSnapshot {
+            id: "req_permission_1".to_string(),
+            command_summary: "bash: cargo test".to_string(),
+            risk: "high".to_string(),
+            workspace: Some("/tmp/project".to_string()),
+            created_at: Some("2026-05-24T00:00:00Z".to_string()),
+            timeout_seconds: Some(300),
+        }],
+    };
+    let json = encode_event(&event);
+    assert!(json.contains("\"type\":\"approval_requests\""));
+    assert!(json.contains("\"command_summary\":\"bash: cargo test\""));
+
+    let decoded = parse_event_json(json.trim())?;
+    let ServerEvent::ApprovalRequests { id, requests } = decoded else {
+        return Err(anyhow!("expected ApprovalRequests event"));
+    };
+    assert_eq!(id, 78);
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].risk, "high");
+    assert_eq!(requests[0].workspace.as_deref(), Some("/tmp/project"));
+    Ok(())
+}
+
+#[test]
 fn test_stdin_request_event_roundtrip() -> Result<()> {
     let event = ServerEvent::StdinRequest {
         request_id: "stdin-xyz-1".to_string(),

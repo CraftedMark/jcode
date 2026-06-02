@@ -1,0 +1,21 @@
+{
+  "type": "EFFECT_REQUESTED",
+  "recordedAt": "2026-05-31T18:12:15.079Z",
+  "data": {
+    "harness": "codex",
+    "effectId": "01KSZKS32S64T9MNBWX5PZ2G9V",
+    "invocationKey": "local/jcode-mobile-prd-finish:S000005:jcode-mobile-prd-final-review",
+    "invocationHash": "9310dd5d934075edad9e30c89a05b072c776089d0ea1b0e25802d5e0a3380779",
+    "stepId": "S000005",
+    "taskId": "jcode-mobile-prd-final-review",
+    "kind": "agent",
+    "label": "jcode",
+    "taskDefRef": "tasks/01KSZKS32S64T9MNBWX5PZ2G9V/task.json",
+    "labels": [
+      "jcode",
+      "mobile",
+      "review"
+    ]
+  },
+  "checksum": "0f4db5ec0bbbe2b4988455715d6d1551fb4400b545981bf4d23af81fad9bb93a"
+}

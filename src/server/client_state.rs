@@ -22,6 +22,7 @@ use tokio::sync::{Mutex, RwLock};
 
 const ATTACH_MODEL_PREFETCH_DEBOUNCE_SECS: u64 = 15;
 const RELOAD_RESTORE_MARKER_MAX_AGE: Duration = Duration::from_secs(60);
+const MAX_HISTORY_EVENT_BYTES: usize = 1_000_000;
 
 static LAST_ATTACH_MODEL_PREFETCH: LazyLock<StdMutex<HashMap<String, Instant>>> =
     LazyLock::new(|| StdMutex::new(HashMap::new()));
@@ -400,7 +401,7 @@ async fn send_history_from_persisted_session(
         side_panel,
     };
 
-    write_event(writer, &history_event).await
+    write_history_event(writer, history_event).await
 }
 
 #[expect(
@@ -607,7 +608,7 @@ pub(super) async fn send_history(
         side_panel,
     };
     let encode_start = Instant::now();
-    let json = encode_event(&history_event);
+    let json = encode_history_event_with_size_guard(history_event, session_id);
     let encode_ms = encode_start.elapsed().as_millis();
     let writer_lock_start = Instant::now();
     let mut writer_guard = writer.lock().await;
@@ -675,6 +676,42 @@ async fn write_event(writer: &Arc<Mutex<WriteHalf>>, event: &ServerEvent) -> Res
     let mut writer = writer.lock().await;
     writer.write_all(json.as_bytes()).await?;
     Ok(())
+}
+
+async fn write_history_event(writer: &Arc<Mutex<WriteHalf>>, event: ServerEvent) -> Result<()> {
+    let session_id = match &event {
+        ServerEvent::History { session_id, .. } => session_id.clone(),
+        _ => String::new(),
+    };
+    let json = encode_history_event_with_size_guard(event, &session_id);
+    let mut writer = writer.lock().await;
+    writer.write_all(json.as_bytes()).await?;
+    Ok(())
+}
+
+fn encode_history_event_with_size_guard(mut event: ServerEvent, session_id: &str) -> String {
+    let json = encode_event(&event);
+    if json.len() <= MAX_HISTORY_EVENT_BYTES {
+        return json;
+    }
+
+    if let ServerEvent::History { images, .. } = &mut event {
+        let dropped_images = images.len();
+        if dropped_images > 0 {
+            images.clear();
+            let compact_json = encode_event(&event);
+            crate::logging::warn(&format!(
+                "History payload for session {} was {} bytes; omitted {} rendered image(s), now {} bytes",
+                session_id,
+                json.len(),
+                dropped_images,
+                compact_json.len(),
+            ));
+            return compact_json;
+        }
+    }
+
+    json
 }
 
 pub(super) fn spawn_model_prefetch_update(provider: Arc<dyn Provider>, agent: Arc<Mutex<Agent>>) {

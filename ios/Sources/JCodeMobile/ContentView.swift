@@ -416,6 +416,11 @@ struct StreamView: View {
                         emptyState
                     }
 
+                    if !model.pendingApprovals.isEmpty {
+                        ApprovalPanel(approvals: model.pendingApprovals)
+                            .padding(.bottom, JC.Spacing.sm)
+                    }
+
                     ForEach(model.messages) { message in
                         StreamEntry(message: message)
                             .id(message.id)
@@ -453,6 +458,105 @@ struct StreamView: View {
                 proxy.scrollTo(id, anchor: .bottom)
             }
         }
+    }
+}
+
+// MARK: - Approvals
+
+struct ApprovalPanel: View {
+    @EnvironmentObject private var model: AppModel
+    let approvals: [MobileCoreApproval]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: JC.Spacing.sm) {
+            HStack(spacing: JC.Spacing.xs) {
+                Image(systemName: "hand.raised.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(JC.Colors.amber)
+                Text("Approval Required")
+                    .font(JC.Fonts.caption)
+                    .foregroundStyle(JC.Colors.textPrimary)
+            }
+
+            ForEach(approvals) { approval in
+                VStack(alignment: .leading, spacing: JC.Spacing.sm) {
+                    HStack(alignment: .top, spacing: JC.Spacing.sm) {
+                        RiskPill(risk: approval.risk)
+                        Text(approval.commandSummary)
+                            .font(JC.Fonts.streamSmall)
+                            .foregroundStyle(JC.Colors.textSecondary)
+                            .textSelection(.enabled)
+                            .lineLimit(3)
+                    }
+
+                    HStack(spacing: JC.Spacing.sm) {
+                        Button {
+                            Task { await model.submitApproval(approval, approved: false) }
+                        } label: {
+                            Label("Deny", systemImage: "xmark")
+                        }
+                        .buttonStyle(CompactDecisionButton(color: JC.Colors.destructive))
+
+                        Button {
+                            Task { await model.submitApproval(approval, approved: true) }
+                        } label: {
+                            Label("Allow", systemImage: "checkmark")
+                        }
+                        .buttonStyle(CompactDecisionButton(color: JC.Colors.green))
+                    }
+                }
+                .padding(JC.Spacing.sm)
+                .background(JC.Colors.surface)
+                .clipShape(RoundedRectangle(cornerRadius: JC.Radius.sm, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: JC.Radius.sm, style: .continuous)
+                        .stroke(JC.Colors.amber.opacity(0.35), lineWidth: 1)
+                )
+            }
+        }
+        .padding(JC.Spacing.sm)
+        .background(JC.Colors.amber.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: JC.Radius.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: JC.Radius.md, style: .continuous)
+                .stroke(JC.Colors.amber.opacity(0.25), lineWidth: 1)
+        )
+    }
+}
+
+struct RiskPill: View {
+    let risk: String
+
+    var body: some View {
+        Text(risk.uppercased())
+            .font(.system(size: 10, weight: .bold, design: .monospaced))
+            .foregroundStyle(color)
+            .padding(.horizontal, JC.Spacing.xs)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.14))
+            .clipShape(Capsule())
+    }
+
+    private var color: Color {
+        switch risk.lowercased() {
+        case "high": JC.Colors.destructive
+        case "medium": JC.Colors.amber
+        default: JC.Colors.green
+        }
+    }
+}
+
+struct CompactDecisionButton: ButtonStyle {
+    let color: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(JC.Fonts.caption)
+            .foregroundStyle(color)
+            .padding(.horizontal, JC.Spacing.md)
+            .padding(.vertical, JC.Spacing.xs)
+            .background(color.opacity(configuration.isPressed ? 0.22 : 0.12))
+            .clipShape(Capsule())
     }
 }
 
@@ -756,6 +860,8 @@ struct SettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showQRScanner = false
     @State private var showAddServer = false
+    @State private var rustCoreStatus = RustCoreDiagnostics.smoke()
+    @State private var notificationStatus = "Not requested"
 
     var body: some View {
         NavigationStack {
@@ -765,6 +871,7 @@ struct SettingsSheet: View {
                 ScrollView {
                     VStack(spacing: JC.Spacing.xl) {
                         connectionSection
+                        diagnosticsSection
                         repairPairingSection
                         serversSection
                         sessionsSection
@@ -794,6 +901,126 @@ struct SettingsSheet: View {
         .sheet(isPresented: $showAddServer) {
             AddServerSheet(isPresented: $showAddServer)
         }
+    }
+
+    private var diagnosticsSection: some View {
+        VStack(alignment: .leading, spacing: JC.Spacing.md) {
+            SectionHeader(title: "Diagnostics")
+
+            VStack(spacing: JC.Spacing.md) {
+                DiagnosticRow(
+                    icon: rustCoreStatus == "Rust core linked" ? "checkmark.seal.fill" : "exclamationmark.triangle.fill",
+                    title: "Rust mobile core",
+                    value: rustCoreStatus,
+                    isHealthy: rustCoreStatus == "Rust core linked"
+                ) {
+                    rustCoreStatus = RustCoreDiagnostics.smoke()
+                }
+
+                DiagnosticRow(
+                    icon: model.rustCoreReducerStatus.contains("failed") || model.rustCoreReducerStatus.contains("not linked") ? "point.3.connected.trianglepath.dotted" : "point.3.connected.trianglepath.dotted",
+                    title: "Rust reducer",
+                    value: model.rustCoreReducerStatus,
+                    isHealthy: !model.rustCoreReducerStatus.contains("failed") && !model.rustCoreReducerStatus.contains("not linked")
+                ) {
+                    model.rustCoreReducerStatus = RustCoreDiagnostics.smoke()
+                }
+
+                DiagnosticRow(
+                    icon: model.gatewayHealthStatus == "Gateway reachable" ? "network" : "antenna.radiowaves.left.and.right.slash",
+                    title: "Gateway health",
+                    value: gatewayDiagnosticText,
+                    isHealthy: model.gatewayHealthStatus == "Gateway reachable"
+                ) {
+                    Task { await model.refreshGatewayDiagnostics() }
+                }
+
+                DiagnosticRow(
+                    icon: "server.rack",
+                    title: "Selected server",
+                    value: selectedServerDiagnosticText,
+                    isHealthy: model.selectedServer != nil
+                )
+
+                DiagnosticRow(
+                    icon: model.serverVersion.isEmpty ? "number" : "checkmark.seal.fill",
+                    title: "Server version",
+                    value: model.serverVersion.isEmpty ? "Unknown" : model.serverVersion,
+                    isHealthy: !model.serverVersion.isEmpty
+                )
+
+                DiagnosticRow(
+                    icon: "point.3.connected.trianglepath.dotted",
+                    title: "Transport",
+                    value: model.connectionTransport,
+                    isHealthy: model.connectionState == .connected
+                )
+
+                DiagnosticRow(
+                    icon: model.connectionPhase == "Unknown" ? "waveform.path.ecg" : "checkmark.circle.fill",
+                    title: "Connection phase",
+                    value: model.connectionPhase,
+                    isHealthy: model.connectionPhase != "Unknown"
+                )
+
+                DiagnosticRow(
+                    icon: model.providerName.isEmpty ? "cpu" : "checkmark.seal.fill",
+                    title: "Provider",
+                    value: model.providerName.isEmpty ? "Unknown" : model.providerName,
+                    isHealthy: !model.providerName.isEmpty
+                )
+
+                if !model.statusDetail.isEmpty {
+                    DiagnosticRow(
+                        icon: "text.bubble",
+                        title: "Status detail",
+                        value: model.statusDetail,
+                        isHealthy: true
+                    )
+                }
+
+                DiagnosticRow(
+                    icon: model.lastDisconnectReason == "None" ? "checkmark.circle.fill" : "waveform.path.ecg",
+                    title: "Last disconnect",
+                    value: model.lastDisconnectReason,
+                    isHealthy: model.lastDisconnectReason == "None" || model.connectionState == .connected
+                )
+
+                DiagnosticRow(
+                    icon: notificationStatus == "Allowed" ? "bell.badge.fill" : "bell.slash.fill",
+                    title: "Notifications",
+                    value: notificationStatus,
+                    isHealthy: notificationStatus == "Allowed" || notificationStatus == "Provisional"
+                ) {
+                    Task {
+                        await model.notifications.requestAuthorization()
+                        notificationStatus = model.notifications.status
+                    }
+                }
+            }
+            .task {
+                await model.notifications.refreshAuthorizationStatus()
+                notificationStatus = model.notifications.status
+            }
+        }
+    }
+
+    private var gatewayDiagnosticText: String {
+        var parts = [model.gatewayHealthStatus]
+        if !model.gatewayHealthVersion.isEmpty {
+            parts.append(model.gatewayHealthVersion)
+        }
+        if let checkedAt = model.gatewayHealthCheckedAt {
+            parts.append(checkedAt.formatted(date: .omitted, time: .shortened))
+        }
+        return parts.joined(separator: " - ")
+    }
+
+    private var selectedServerDiagnosticText: String {
+        guard let server = model.selectedServer else {
+            return "No server selected"
+        }
+        return "\(server.host):\(server.port)"
     }
 
     private var repairPairingSection: some View {
@@ -1081,6 +1308,59 @@ struct SectionHeader: View {
             .font(JC.Fonts.caption)
             .foregroundStyle(JC.Colors.textTertiary)
             .tracking(1.2)
+    }
+}
+
+struct DiagnosticRow: View {
+    let icon: String
+    let title: String
+    let value: String
+    let isHealthy: Bool
+    let refresh: (() -> Void)?
+
+    init(
+        icon: String,
+        title: String,
+        value: String,
+        isHealthy: Bool,
+        refresh: (() -> Void)? = nil
+    ) {
+        self.icon = icon
+        self.title = title
+        self.value = value
+        self.isHealthy = isHealthy
+        self.refresh = refresh
+    }
+
+    var body: some View {
+        HStack(spacing: JC.Spacing.md) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(isHealthy ? JC.Colors.accent : JC.Colors.destructive)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(JC.Fonts.callout)
+                    .foregroundStyle(JC.Colors.textPrimary)
+                Text(value)
+                    .font(JC.Fonts.caption)
+                    .foregroundStyle(JC.Colors.textTertiary)
+                    .lineLimit(3)
+            }
+
+            Spacer()
+
+            if let refresh {
+                Button(action: refresh) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                .buttonStyle(GhostButton())
+                .accessibilityLabel("Refresh \(title)")
+            }
+        }
+        .glassCard()
     }
 }
 

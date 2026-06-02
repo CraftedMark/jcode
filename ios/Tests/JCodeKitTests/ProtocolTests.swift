@@ -76,6 +76,22 @@ do {
     assertEqual(json6["type"] as? String, "rename_session")
     assertEqual(json6["id"] as? UInt64, 13)
     assertNil(json6["title"] as? String)
+
+    let json7 = try encodeRequest(.approvalDecision(
+        id: 77,
+        requestId: "req_permission_1",
+        approved: false,
+        reason: "Not safe from phone"
+    ))
+    assertEqual(json7["type"] as? String, "approval_decision")
+    assertEqual(json7["id"] as? UInt64, 77)
+    assertEqual(json7["request_id"] as? String, "req_permission_1")
+    assertEqual(json7["approved"] as? Bool, false)
+    assertEqual(json7["reason"] as? String, "Not safe from phone")
+
+    let json8 = try encodeRequest(.approvalRequests(id: 78))
+    assertEqual(json8["type"] as? String, "approval_requests")
+    assertEqual(json8["id"] as? UInt64, 78)
 }
 
 // MARK: - ServerEvent Decoding
@@ -149,6 +165,30 @@ do {
         assertNil(title)
         assertEqual(displayTitle, "Generated title")
     } else { check(false, "Expected sessionRenamed clear") }
+
+    let e15 = try decodeEvent(#"{"type":"approval_requests","id":78,"requests":[{"id":"req_permission_1","command_summary":"bash: cargo test","risk":"high","workspace":"/tmp/project","created_at":"2026-05-24T00:00:00Z","timeout_seconds":300}]}"#)
+    if case .approvalRequests(let id, let requests) = e15 {
+        assertEqual(id, 78)
+        assertEqual(requests.count, 1)
+        assertEqual(requests[0].id, "req_permission_1")
+        assertEqual(requests[0].commandSummary, "bash: cargo test")
+        assertEqual(requests[0].risk, "high")
+        assertEqual(requests[0].workspace, "/tmp/project")
+        assertEqual(requests[0].timeoutSeconds, 300)
+    } else { check(false, "Expected approvalRequests") }
+
+    let e16 = try decodeEvent(#"{"type":"reloading","new_socket":"ws://100.113.37.61:7643/ws"}"#)
+    if case .reloading(let newSocket) = e16 {
+        assertEqual(newSocket, "ws://100.113.37.61:7643/ws")
+    } else { check(false, "Expected reloading") }
+
+    let e17 = try decodeEvent(#"{"type":"reload_progress","step":"launch","message":"Restart failed.","success":false,"output":"port in use"}"#)
+    if case .reloadProgress(let step, let message, let success, let output) = e17 {
+        assertEqual(step, "launch")
+        assertEqual(message, "Restart failed.")
+        assertEqual(success, false)
+        assertEqual(output, "port in use")
+    } else { check(false, "Expected reloadProgress") }
 }
 
 // MARK: - History
@@ -241,6 +281,8 @@ do {
         .getState(id: 5), .setModel(id: 6, model: "claude-sonnet-4-20250514"),
         .compact(id: 7), .renameSession(id: 12, title: "Release planning"),
         .split(id: 8), .backgroundTool(id: 9),
+        .approvalDecision(id: 14, requestId: "req_permission_1", approved: true),
+        .approvalRequests(id: 15),
         .resumeSession(id: 10, sessionId: "fox"),
         .cycleModel(id: 11, direction: -1),
     ]

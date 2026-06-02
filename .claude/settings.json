@@ -1,0 +1,49 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'jcode: iterate with cargo check -q (never cargo build); put new code in the owning crates/jcode-* (not root src/); never hand-edit ~/.jcode or auth files; before merge run the verify-gate skill - panic/swallowed-error/test-size budgets and dependency-boundaries are CI-only. Detail: project-conventions skill.'"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in */.jcode/builds/*|*/.jcode/auth.json|*/.jcode/openai-auth.json|*/.jcode/gemini_oauth.json|*/.jcode/azure-auth.json|*/.jcode/config.toml|*/.jcode/memory/*|*/.jcode/skills/*|*/.local/bin/jcode|*/target/*) echo 'Blocked: protected jcode self-dev/auth/runtime path. Use scripts/install_release.sh or the jcode CLI, never a direct edit.' >&2; exit 2 ;; esac"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "c=$(jq -r '.tool_input.command // empty'); if printf '%s' \"$c\" | grep -qE 'rm[[:space:]]+-[a-zA-Z]*[rf][a-zA-Z]*([[:space:]]|$).*(/\\.jcode|\\.jcode/|\\.jcode$)'; then echo 'BLOCKED: rm targeting ~/.jcode (auth, memory, builds, skills live there). Delete specific files deliberately or use the jcode CLI.' >&2; exit 2; fi; if printf '%s' \"$c\" | grep -qE 'cargo[[:space:]]+install' && printf '%s' \"$c\" | grep -qE '(--path|[[:space:]]jcode([[:space:]]|$))'; then echo 'WARNING: cargo install of jcode/--path drops a binary in ~/.cargo/bin that shadows the ~/.local/bin/jcode launcher (PATH order). Use scripts/install_release.sh.' >&2; fi; if printf '%s' \"$c\" | grep -qE 'cp[[:space:]].*\\.jcode/builds'; then echo 'WARNING: copying into ~/.jcode/builds breaks self-dev atomicity. Use scripts/install_release.sh.' >&2; fi; exit 0"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.rs) rustfmt --edition 2024 \"$f\" 2>/dev/null || true ;; esac"
+          },
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in */Cargo.lock|*/Cargo.toml|Cargo.lock|Cargo.toml) cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null && cargo audit 2>&1 | tail -15 >&2 || true ;; esac"
+          }
+        ]
+      }
+    ]
+  }
+}

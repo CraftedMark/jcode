@@ -20,6 +20,8 @@ public enum Request: Encodable, Sendable {
     case backgroundTool(id: UInt64)
     case split(id: UInt64)
     case stdinResponse(id: UInt64, requestId: String, input: String)
+    case approvalDecision(id: UInt64, requestId: String, approved: Bool, reason: String? = nil)
+    case approvalRequests(id: UInt64)
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: DynamicCodingKey.self)
@@ -112,6 +114,19 @@ public enum Request: Encodable, Sendable {
             try container.encode(id, forKey: .key("id"))
             try container.encode(requestId, forKey: .key("request_id"))
             try container.encode(input, forKey: .key("input"))
+
+        case let .approvalDecision(id, requestId, approved, reason):
+            try container.encode("approval_decision", forKey: .key("type"))
+            try container.encode(id, forKey: .key("id"))
+            try container.encode(requestId, forKey: .key("request_id"))
+            try container.encode(approved, forKey: .key("approved"))
+            if let reason {
+                try container.encode(reason, forKey: .key("reason"))
+            }
+
+        case let .approvalRequests(id):
+            try container.encode("approval_requests", forKey: .key("type"))
+            try container.encode(id, forKey: .key("id"))
         }
     }
 }
@@ -128,6 +143,9 @@ public enum ServerEvent: Decodable, Sendable {
     case toolDone(id: String, name: String, output: String, error: String?)
     case tokenUsage(input: UInt64, output: UInt64, cacheRead: UInt64?, cacheWrite: UInt64?)
     case upstreamProvider(provider: String)
+    case connectionType(connection: String)
+    case connectionPhase(phase: String)
+    case statusDetail(detail: String)
     case done(id: UInt64)
     case error(id: UInt64, message: String)
     case pong(id: UInt64)
@@ -138,7 +156,8 @@ public enum ServerEvent: Decodable, Sendable {
     case reloading(newSocket: String?)
     case reloadProgress(step: String, message: String, success: Bool?, output: String?)
     case modelChanged(id: UInt64, model: String, providerName: String?, error: String?)
-    case notification(Notification)
+    case availableModelsUpdated(providerName: String?, providerModel: String?, availableModels: [String])
+    case notification(ServerNotification)
     case swarmStatus(members: [SwarmMemberStatus])
     case mcpStatus(servers: [String])
     case softInterruptInjected(content: String, point: String, toolsSkipped: Int?)
@@ -147,6 +166,7 @@ public enum ServerEvent: Decodable, Sendable {
     case splitResponse(id: UInt64, newSessionId: String, newSessionName: String)
     case compactResult(id: UInt64, message: String, success: Bool)
     case stdinRequest(requestId: String, prompt: String, isPassword: Bool, toolCallId: String)
+    case approvalRequests(id: UInt64, requests: [ApprovalRequestPayload])
     case unknown(type: String, raw: String)
 
     enum CodingKeys: String, CodingKey {
@@ -202,6 +222,18 @@ public enum ServerEvent: Decodable, Sendable {
             let provider = try container.decode(String.self, forKey: .key("provider"))
             self = .upstreamProvider(provider: provider)
 
+        case "connection_type":
+            let connection = try container.decode(String.self, forKey: .key("connection"))
+            self = .connectionType(connection: connection)
+
+        case "connection_phase":
+            let phase = try container.decode(String.self, forKey: .key("phase"))
+            self = .connectionPhase(phase: phase)
+
+        case "status_detail":
+            let detail = try container.decode(String.self, forKey: .key("detail"))
+            self = .statusDetail(detail: detail)
+
         case "done":
             let id = try container.decode(UInt64.self, forKey: .key("id"))
             self = .done(id: id)
@@ -254,8 +286,14 @@ public enum ServerEvent: Decodable, Sendable {
             let error = try container.decodeIfPresent(String.self, forKey: .key("error"))
             self = .modelChanged(id: id, model: model, providerName: providerName, error: error)
 
+        case "available_models_updated":
+            let providerName = try container.decodeIfPresent(String.self, forKey: .key("provider_name"))
+            let providerModel = try container.decodeIfPresent(String.self, forKey: .key("provider_model"))
+            let availableModels = try container.decodeIfPresent([String].self, forKey: .key("available_models")) ?? []
+            self = .availableModelsUpdated(providerName: providerName, providerModel: providerModel, availableModels: availableModels)
+
         case "notification":
-            let notif = try Notification(from: decoder)
+            let notif = try ServerNotification(from: decoder)
             self = .notification(notif)
 
         case "swarm_status":
@@ -301,6 +339,11 @@ public enum ServerEvent: Decodable, Sendable {
             let toolCallId = try container.decodeIfPresent(String.self, forKey: .key("tool_call_id")) ?? ""
             self = .stdinRequest(requestId: requestId, prompt: prompt, isPassword: isPassword, toolCallId: toolCallId)
 
+        case "approval_requests":
+            let id = try container.decode(UInt64.self, forKey: .key("id"))
+            let requests = try container.decode([ApprovalRequestPayload].self, forKey: .key("requests"))
+            self = .approvalRequests(id: id, requests: requests)
+
         default:
             let raw = String(describing: try? JSONSerialization.data(withJSONObject: [:]))
             self = .unknown(type: type, raw: raw)
@@ -320,6 +363,24 @@ public struct HistoryMessage: Codable, Sendable {
         case role, content
         case toolCalls = "tool_calls"
         case toolData = "tool_data"
+    }
+}
+
+public struct ApprovalRequestPayload: Decodable, Sendable, Equatable {
+    public let id: String
+    public let commandSummary: String
+    public let risk: String
+    public let workspace: String?
+    public let createdAt: String?
+    public let timeoutSeconds: UInt64?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case commandSummary = "command_summary"
+        case risk
+        case workspace
+        case createdAt = "created_at"
+        case timeoutSeconds = "timeout_seconds"
     }
 }
 
@@ -412,7 +473,7 @@ public struct SwarmMemberStatus: Codable, Sendable {
     }
 }
 
-public struct Notification: Decodable, Sendable {
+public struct ServerNotification: Decodable, Sendable {
     public let fromSession: String
     public let fromName: String?
     public let notificationType: NotificationType

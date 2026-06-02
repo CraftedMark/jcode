@@ -1,0 +1,74 @@
+{
+  "agent": {
+    "name": "ios-native-expert",
+    "outputSchema": {
+      "properties": {
+        "alreadyDone": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "selectedSlice": {
+          "type": "string"
+        },
+        "verificationCommands": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "alreadyDone",
+        "selectedSlice",
+        "files",
+        "verificationCommands"
+      ],
+      "type": "object"
+    },
+    "prompt": {
+      "context": {
+        "prdPath": "docs/JCODE_MOBILE_PRD.md",
+        "targetSlice": "Finish the next bounded JCode Mobile PRD work by reconciling stale PRD state against the current Rust mobile core, simulator, Swift bridge, diagnostics, and implement the highest-leverage remaining gap that can be verified locally without overclaiming APNs or physical-device acceptance."
+      },
+      "instructions": [
+        "Read the PRD and current Rust mobile core, simulator, Swift bridge, and diagnostics surfaces.",
+        "Separate already-implemented PRD items from real gaps.",
+        "Pick the highest-leverage bounded slice that can be implemented and verified in this workspace now.",
+        "Preserve the native Swift host plus shared Rust core direction.",
+        "Return concrete file targets and executable verification commands."
+      ],
+      "outputFormat": "JSON",
+      "role": "senior Rust/iOS mobile architect",
+      "task": "Audit the JCode Mobile PRD against the current repository and choose the next bounded implementation slice."
+    }
+  },
+  "io": {
+    "inputJsonPath": "tasks/01KSYCWGCKWABMEFKF6MRKAX8Z/input.json",
+    "outputJsonPath": "tasks/01KSYCWGCKWABMEFKF6MRKAX8Z/output.json"
+  },
+  "kind": "agent",
+  "labels": [
+    "audit",
+    "jcode",
+    "mobile",
+    "prd"
+  ],
+  "title": "Audit JCode Mobile PRD against current code",
+  "schemaVersion": "2026.01.tasks-v1",
+  "effectId": "01KSYCWGCKWABMEFKF6MRKAX8Z",
+  "taskId": "jcode-mobile-prd-audit",
+  "invocationKey": "local/jcode-mobile-prd-finish:S000001:jcode-mobile-prd-audit",
+  "stepId": "S000001",
+  "inputs": {
+    "prdPath": "docs/JCODE_MOBILE_PRD.md",
+    "targetSlice": "Finish the next bounded JCode Mobile PRD work by reconciling stale PRD state against the current Rust mobile core, simulator, Swift bridge, diagnostics, and implement the highest-leverage remaining gap that can be verified locally without overclaiming APNs or physical-device acceptance."
+  }
+}
