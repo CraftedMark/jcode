@@ -574,3 +574,14 @@ Current local verification for the May 31 mobile knowledge/iPad slice:
 - `cargo test gateway_tests --lib`
 - `swift run --package-path ios JCodeKitTests`
 - Xcode simulator build for `JCodeMobile`
+
+## Self-Improving Agent
+
+- Owning agent: Hex (TBD — confirm owner with Mark). Improvement work on this project runs through the owning agent, with lessons captured at the end of each work session.
+- Evaluation before claims: improvements are demonstrated via the recursive-improve pattern (eval traces / benchmarks), not asserted.
+
+## Memory
+
+- Project-specific knowledge (decisions, incidents, gotchas, SOPs) lives in this repo's docs/ and the owning agent's wiki.
+- Cross-project knowledge goes to `~/brain/wiki/` per the cross-app-durable-memory-policy.
+- Never secrets — credential names and vault references only.
