@@ -6,3 +6,10 @@ setup = "./scripts/conductor-setup.sh"
 run = "./scripts/conductor-run.sh"
 archive = "./scripts/conductor-archive.sh"
 run_mode = "nonconcurrent"
+
+[prompts]
+general = "Work in small, reviewable changes. Preserve user edits, prefer focused tests before broad builds, and call out any skipped validation."
+code_review = "Lead with correctness, regression, security, and missing-test findings. Include exact file/line references and note any validation gaps."
+create_pr = "Summarize user-visible behavior changes, implementation notes, risk areas, and the exact tests or smoke checks run."
+fix_errors = "Fix the smallest failing surface first, avoid broad refactors, and rerun the command that failed before moving on."
+resolve_merge_conflicts = "Preserve local JCode fork behavior unless upstream clearly subsumes it. Do not resurrect deleted legacy paths when code has moved into crates."

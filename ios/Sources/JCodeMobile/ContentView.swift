@@ -871,6 +871,10 @@ struct SettingsSheet: View {
             }
             .glassCard()
 
+            if !model.statusItems.isEmpty {
+                StatusSummaryStrip(items: model.statusItems)
+            }
+
             if let error = model.errorMessage {
                 HStack(spacing: JC.Spacing.sm) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -952,56 +956,7 @@ struct SettingsSheet: View {
                         Button {
                             Task { await model.switchToSession(session.sessionId) }
                         } label: {
-                            HStack(spacing: JC.Spacing.sm) {
-                                Image(systemName: session.activity?.isProcessing == true ? "bolt.horizontal.circle" : "terminal")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(session.isActive ? JC.Colors.accent : JC.Colors.textTertiary)
-                                    .frame(width: 20)
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(session.title ?? session.displayName)
-                                        .font(JC.Fonts.callout)
-                                        .foregroundStyle(JC.Colors.textPrimary)
-                                        .lineLimit(1)
-                                    HStack(spacing: 6) {
-                                        Text(session.displayName)
-                                        if let model = session.model, !model.isEmpty {
-                                            Text(model)
-                                        }
-                                        if session.clientCount > 1 {
-                                            Text("\(session.clientCount) clients")
-                                        }
-                                    }
-                                    .font(JC.Fonts.caption)
-                                    .foregroundStyle(JC.Colors.textTertiary)
-                                    .lineLimit(1)
-                                }
-
-                                Spacer()
-
-                                if session.isActive {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .font(.system(size: 14))
-                                        .foregroundStyle(JC.Colors.accent)
-                                }
-                            }
-                            .padding(.horizontal, JC.Spacing.md)
-                            .padding(.vertical, JC.Spacing.sm + 2)
-                            .background(
-                                session.isActive
-                                    ? JC.Colors.accentDim
-                                    : JC.Colors.surface
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: JC.Radius.sm, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: JC.Radius.sm, style: .continuous)
-                                    .stroke(
-                                        session.isActive
-                                            ? JC.Colors.borderFocused
-                                            : JC.Colors.border,
-                                        lineWidth: 1
-                                    )
-                            )
+                            SessionSummaryRow(session: session)
                         }
                         .buttonStyle(.plain)
                     }
@@ -1141,6 +1096,157 @@ struct SectionHeader: View {
             .font(JC.Fonts.caption)
             .foregroundStyle(JC.Colors.textTertiary)
             .tracking(1.2)
+    }
+}
+
+struct StatusSummaryStrip: View {
+    let items: [AppModel.StatusItem]
+
+    var body: some View {
+        VStack(spacing: JC.Spacing.xs) {
+            ForEach(items) { item in
+                HStack(alignment: .top, spacing: JC.Spacing.sm) {
+                    Image(systemName: item.icon)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(color(for: item.tone))
+                        .frame(width: 18, height: 18)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.title)
+                            .font(JC.Fonts.caption)
+                            .foregroundStyle(JC.Colors.textPrimary)
+                            .lineLimit(1)
+
+                        if let detail = item.detail, !detail.isEmpty {
+                            Text(detail)
+                                .font(JC.Fonts.monoCaption)
+                                .foregroundStyle(JC.Colors.textTertiary)
+                                .lineLimit(2)
+                        }
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, JC.Spacing.md)
+                .padding(.vertical, JC.Spacing.sm)
+                .background(color(for: item.tone).opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: JC.Radius.sm, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: JC.Radius.sm, style: .continuous)
+                        .stroke(color(for: item.tone).opacity(0.25), lineWidth: 1)
+                )
+            }
+        }
+    }
+
+    private func color(for tone: AppModel.StatusItem.Tone) -> Color {
+        switch tone {
+        case .info: JC.Colors.accent
+        case .success: JC.Colors.green
+        case .warning: JC.Colors.amber
+        case .error: JC.Colors.red
+        }
+    }
+}
+
+struct SessionSummaryRow: View {
+    let session: SessionSummary
+
+    var body: some View {
+        HStack(alignment: .top, spacing: JC.Spacing.sm) {
+            Image(systemName: iconName)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(iconColor)
+                .frame(width: 22, height: 22)
+
+            VStack(alignment: .leading, spacing: JC.Spacing.xs) {
+                HStack(spacing: JC.Spacing.xs) {
+                    Text(session.title ?? session.displayName)
+                        .font(JC.Fonts.callout)
+                        .foregroundStyle(JC.Colors.textPrimary)
+                        .lineLimit(1)
+
+                    if session.isActive {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(JC.Colors.accent)
+                    }
+                }
+
+                HStack(spacing: JC.Spacing.xs) {
+                    SessionBadge(text: session.displayName, color: JC.Colors.textTertiary)
+                    if session.isLive {
+                        SessionBadge(text: "live", color: JC.Colors.green)
+                    }
+                    if session.activity?.isProcessing == true {
+                        SessionBadge(text: "busy", color: JC.Colors.amber)
+                    }
+                    if session.clientCount > 0 {
+                        SessionBadge(text: "\(session.clientCount) client\(session.clientCount == 1 ? "" : "s")", color: JC.Colors.cyan)
+                    }
+                }
+
+                HStack(spacing: JC.Spacing.xs) {
+                    if let model = session.model, !model.isEmpty {
+                        Text(model)
+                    }
+                    if let tool = session.activity?.currentToolName, !tool.isEmpty {
+                        Text(tool)
+                    }
+                    if let detail = session.statusDetail, !detail.isEmpty {
+                        Text(detail)
+                    } else {
+                        Text(session.status)
+                    }
+                }
+                .font(JC.Fonts.monoCaption)
+                .foregroundStyle(JC.Colors.textTertiary)
+                .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, JC.Spacing.md)
+        .padding(.vertical, JC.Spacing.sm + 2)
+        .background(session.isActive ? JC.Colors.accentDim : JC.Colors.surface)
+        .clipShape(RoundedRectangle(cornerRadius: JC.Radius.sm, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: JC.Radius.sm, style: .continuous)
+                .stroke(session.isActive ? JC.Colors.borderFocused : JC.Colors.border, lineWidth: 1)
+        )
+    }
+
+    private var iconName: String {
+        if session.activity?.isProcessing == true {
+            return "bolt.horizontal.circle"
+        }
+        return session.isLive ? "antenna.radiowaves.left.and.right" : "terminal"
+    }
+
+    private var iconColor: Color {
+        if session.activity?.isProcessing == true {
+            return JC.Colors.amber
+        }
+        if session.isActive {
+            return JC.Colors.accent
+        }
+        return session.isLive ? JC.Colors.green : JC.Colors.textTertiary
+    }
+}
+
+struct SessionBadge: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        Text(text)
+            .font(JC.Fonts.monoCaption)
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .padding(.horizontal, JC.Spacing.xs)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: JC.Radius.sm, style: .continuous))
     }
 }
 

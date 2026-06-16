@@ -87,6 +87,44 @@ public struct SoftInterruptInjectionInfo: Sendable {
     }
 }
 
+public struct ReloadProgressInfo: Sendable {
+    public let step: String
+    public let message: String
+    public let success: Bool?
+    public let output: String?
+}
+
+public struct MemoryInjectionInfo: Sendable {
+    public let count: Int
+    public let prompt: String
+    public let promptChars: Int
+    public let computedAgeMs: UInt64
+}
+
+public struct SplitResponseInfo: Sendable {
+    public let id: UInt64
+    public let newSessionId: String
+    public let newSessionName: String
+}
+
+public struct CompactResultInfo: Sendable {
+    public let id: UInt64
+    public let message: String
+    public let success: Bool
+}
+
+public struct StdinRequestInfo: Sendable {
+    public let requestId: String
+    public let prompt: String
+    public let isPassword: Bool
+    public let toolCallId: String
+}
+
+public struct UnknownServerEventInfo: Sendable {
+    public let type: String
+    public let raw: String
+}
+
 @MainActor
 public protocol JCodeClientDelegate: AnyObject {
     func clientDidConnect(serverInfo: ServerInfo)
@@ -105,6 +143,16 @@ public protocol JCodeClientDelegate: AnyObject {
     func clientDidReceiveHistory(messages: [HistoryMessage])
     func clientDidInterrupt(_ interrupt: InterruptInfo)
     func clientDidInjectSoftInterrupt(_ info: SoftInterruptInjectionInfo)
+    func clientDidStartReload(newSocket: String?)
+    func clientDidUpdateReloadProgress(_ info: ReloadProgressInfo)
+    func clientDidReceiveNotification(_ notification: JCodeNotification)
+    func clientDidUpdateSwarmStatus(members: [SwarmMemberStatus])
+    func clientDidUpdateMCPStatus(servers: [String])
+    func clientDidInjectMemory(_ info: MemoryInjectionInfo)
+    func clientDidSplitSession(_ info: SplitResponseInfo)
+    func clientDidCompact(_ info: CompactResultInfo)
+    func clientDidRequestStdin(_ info: StdinRequestInfo)
+    func clientDidReceiveUnknownEvent(_ info: UnknownServerEventInfo)
 }
 
 @MainActor
@@ -117,6 +165,16 @@ public extension JCodeClientDelegate {
     func clientDidReceiveHistory(messages: [HistoryMessage]) {}
     func clientDidInterrupt(_ interrupt: InterruptInfo) {}
     func clientDidInjectSoftInterrupt(_ info: SoftInterruptInjectionInfo) {}
+    func clientDidStartReload(newSocket: String?) {}
+    func clientDidUpdateReloadProgress(_ info: ReloadProgressInfo) {}
+    func clientDidReceiveNotification(_ notification: JCodeNotification) {}
+    func clientDidUpdateSwarmStatus(members: [SwarmMemberStatus]) {}
+    func clientDidUpdateMCPStatus(servers: [String]) {}
+    func clientDidInjectMemory(_ info: MemoryInjectionInfo) {}
+    func clientDidSplitSession(_ info: SplitResponseInfo) {}
+    func clientDidCompact(_ info: CompactResultInfo) {}
+    func clientDidRequestStdin(_ info: StdinRequestInfo) {}
+    func clientDidReceiveUnknownEvent(_ info: UnknownServerEventInfo) {}
 }
 
 public actor JCodeClient {
@@ -284,10 +342,43 @@ public actor JCodeClient {
             let info = SoftInterruptInjectionInfo(content: content, point: point, toolsSkipped: toolsSkipped)
             await callDelegate { $0.clientDidInjectSoftInterrupt(info) }
 
-        case .ack, .pong, .state, .reloading, .reloadProgress,
-             .notification, .swarmStatus, .mcpStatus,
-             .memoryInjected,
-             .splitResponse, .compactResult, .stdinRequest, .unknown:
+        case .reloading(let newSocket):
+            await callDelegate { $0.clientDidStartReload(newSocket: newSocket) }
+
+        case .reloadProgress(let step, let message, let success, let output):
+            let info = ReloadProgressInfo(step: step, message: message, success: success, output: output)
+            await callDelegate { $0.clientDidUpdateReloadProgress(info) }
+
+        case .notification(let notification):
+            await callDelegate { $0.clientDidReceiveNotification(notification) }
+
+        case .swarmStatus(let members):
+            await callDelegate { $0.clientDidUpdateSwarmStatus(members: members) }
+
+        case .mcpStatus(let servers):
+            await callDelegate { $0.clientDidUpdateMCPStatus(servers: servers) }
+
+        case .memoryInjected(let count, let prompt, let promptChars, let computedAgeMs):
+            let info = MemoryInjectionInfo(count: count, prompt: prompt, promptChars: promptChars, computedAgeMs: computedAgeMs)
+            await callDelegate { $0.clientDidInjectMemory(info) }
+
+        case .splitResponse(let id, let newSessionId, let newSessionName):
+            let info = SplitResponseInfo(id: id, newSessionId: newSessionId, newSessionName: newSessionName)
+            await callDelegate { $0.clientDidSplitSession(info) }
+
+        case .compactResult(let id, let message, let success):
+            let info = CompactResultInfo(id: id, message: message, success: success)
+            await callDelegate { $0.clientDidCompact(info) }
+
+        case .stdinRequest(let requestId, let prompt, let isPassword, let toolCallId):
+            let info = StdinRequestInfo(requestId: requestId, prompt: prompt, isPassword: isPassword, toolCallId: toolCallId)
+            await callDelegate { $0.clientDidRequestStdin(info) }
+
+        case .unknown(let type, let raw):
+            let info = UnknownServerEventInfo(type: type, raw: raw)
+            await callDelegate { $0.clientDidReceiveUnknownEvent(info) }
+
+        case .ack, .pong, .state:
             break
         }
     }

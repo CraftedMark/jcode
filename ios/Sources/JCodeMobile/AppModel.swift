@@ -40,6 +40,21 @@ final class AppModel: ObservableObject {
         }
     }
 
+    struct StatusItem: Identifiable, Equatable {
+        enum Tone: Equatable {
+            case info
+            case success
+            case warning
+            case error
+        }
+
+        let id: String
+        let icon: String
+        let title: String
+        let detail: String?
+        let tone: Tone
+    }
+
     private func imagesEqual(_ lhs: [(String, String)], _ rhs: [(String, String)]) -> Bool {
         guard lhs.count == rhs.count else { return false }
         return zip(lhs, rhs).allSatisfy { left, right in
@@ -90,6 +105,46 @@ final class AppModel: ObservableObject {
     @Published var serverName: String = ""
     @Published var serverVersion: String = ""
     @Published var modelName: String = ""
+    @Published var reloadStatusTitle: String?
+    @Published var reloadStatusDetail: String?
+    @Published var notificationTitle: String?
+    @Published var notificationDetail: String?
+    @Published var swarmStatusTitle: String?
+    @Published var swarmStatusDetail: String?
+    @Published var mcpStatusTitle: String?
+    @Published var mcpStatusDetail: String?
+    @Published var memoryStatusTitle: String?
+    @Published var memoryStatusDetail: String?
+    @Published var pendingInputTitle: String?
+    @Published var pendingInputDetail: String?
+    @Published var diagnosticStatusTitle: String?
+    @Published var diagnosticStatusDetail: String?
+
+    var statusItems: [StatusItem] {
+        [
+            reloadStatusTitle.map {
+                StatusItem(id: "reload", icon: "arrow.clockwise", title: $0, detail: reloadStatusDetail, tone: .info)
+            },
+            pendingInputTitle.map {
+                StatusItem(id: "stdin", icon: "keyboard", title: $0, detail: pendingInputDetail, tone: .warning)
+            },
+            notificationTitle.map {
+                StatusItem(id: "notification", icon: "bell", title: $0, detail: notificationDetail, tone: .info)
+            },
+            swarmStatusTitle.map {
+                StatusItem(id: "swarm", icon: "person.3", title: $0, detail: swarmStatusDetail, tone: .success)
+            },
+            mcpStatusTitle.map {
+                StatusItem(id: "mcp", icon: "point.3.connected.trianglepath.dotted", title: $0, detail: mcpStatusDetail, tone: .success)
+            },
+            memoryStatusTitle.map {
+                StatusItem(id: "memory", icon: "brain.head.profile", title: $0, detail: memoryStatusDetail, tone: .info)
+            },
+            diagnosticStatusTitle.map {
+                StatusItem(id: "diagnostic", icon: "exclamationmark.triangle", title: $0, detail: diagnosticStatusDetail, tone: .error)
+            },
+        ].compactMap { $0 }
+    }
 
     private let credentialStore = CredentialStore()
     private var client: JCodeClient?
@@ -308,6 +363,7 @@ final class AppModel: ObservableObject {
         reconnecting = false
 
         let sessionToResume = activeSessionId.isEmpty ? rememberedSessionId(for: credential) : activeSessionId
+        resetBridgeStatus()
 
         // Keep the existing transcript visible while reconnecting. iOS can suspend the
         // socket when the app backgrounds; clearing here makes it look like the phone
@@ -642,6 +698,23 @@ final class AppModel: ObservableObject {
         errorMessage = nil
     }
 
+    private func resetBridgeStatus() {
+        reloadStatusTitle = nil
+        reloadStatusDetail = nil
+        notificationTitle = nil
+        notificationDetail = nil
+        swarmStatusTitle = nil
+        swarmStatusDetail = nil
+        mcpStatusTitle = nil
+        mcpStatusDetail = nil
+        memoryStatusTitle = nil
+        memoryStatusDetail = nil
+        pendingInputTitle = nil
+        pendingInputDetail = nil
+        diagnosticStatusTitle = nil
+        diagnosticStatusDetail = nil
+    }
+
     fileprivate func onConnected(_ info: ServerInfo) {
         connectionState = .connected
         reconnecting = false
@@ -773,6 +846,85 @@ final class AppModel: ObservableObject {
     fileprivate func onHistory(_ history: [HistoryMessage]) {
         applyHistory(history)
     }
+
+    fileprivate func onReloadStarted(newSocket: String?) {
+        reloadStatusTitle = "Reloading desktop bridge"
+        reloadStatusDetail = newSocket.map { "Next socket: \($0)" }
+        statusMessage = reloadStatusTitle
+    }
+
+    fileprivate func onReloadProgress(_ info: ReloadProgressInfo) {
+        reloadStatusTitle = info.success == false ? "Reload step failed" : info.message
+        reloadStatusDetail = [info.step, info.output]
+            .compactMap { value in
+                let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return trimmed.isEmpty ? nil : trimmed
+            }
+            .joined(separator: " - ")
+        if info.success == false {
+            errorMessage = info.message
+        } else {
+            statusMessage = info.message
+        }
+    }
+
+    fileprivate func onNotification(_ notification: JCodeNotification) {
+        let sender = notification.fromName?.isEmpty == false ? notification.fromName! : notification.fromSession
+        notificationTitle = sender
+        notificationDetail = notification.message
+        statusMessage = notification.message
+    }
+
+    fileprivate func onSwarmStatus(members: [SwarmMemberStatus]) {
+        swarmStatusTitle = members.isEmpty ? "No swarm members" : "\(members.count) swarm member\(members.count == 1 ? "" : "s")"
+        let activeMembers = members
+            .prefix(3)
+            .map { member in
+                let name = member.friendlyName?.isEmpty == false ? member.friendlyName! : member.sessionId
+                return "\(name): \(member.status)"
+            }
+        swarmStatusDetail = activeMembers.isEmpty ? nil : activeMembers.joined(separator: ", ")
+    }
+
+    fileprivate func onMCPStatus(servers: [String]) {
+        mcpStatusTitle = servers.isEmpty ? "No MCP servers" : "\(servers.count) MCP server\(servers.count == 1 ? "" : "s")"
+        mcpStatusDetail = servers.prefix(4).joined(separator: ", ")
+    }
+
+    fileprivate func onMemoryInjected(_ info: MemoryInjectionInfo) {
+        memoryStatusTitle = "\(info.count) memor\(info.count == 1 ? "y" : "ies") injected"
+        var details = ["\(info.promptChars) chars"]
+        if info.computedAgeMs > 0 {
+            details.append("\(info.computedAgeMs)ms old")
+        }
+        memoryStatusDetail = details.joined(separator: " - ")
+    }
+
+    fileprivate func onSplitSession(_ info: SplitResponseInfo) {
+        statusMessage = "Split into \(info.newSessionName)"
+        if !sessions.contains(info.newSessionId) {
+            sessions.append(info.newSessionId)
+        }
+    }
+
+    fileprivate func onCompact(_ info: CompactResultInfo) {
+        if info.success {
+            statusMessage = info.message
+        } else {
+            errorMessage = info.message
+        }
+    }
+
+    fileprivate func onStdinRequest(_ info: StdinRequestInfo) {
+        pendingInputTitle = info.isPassword ? "Secure input requested" : "Input requested"
+        pendingInputDetail = info.prompt.isEmpty ? info.toolCallId : info.prompt
+        statusMessage = pendingInputTitle
+    }
+
+    fileprivate func onUnknownEvent(_ info: UnknownServerEventInfo) {
+        diagnosticStatusTitle = "Unknown event: \(info.type)"
+        diagnosticStatusDetail = String(info.raw.prefix(160))
+    }
 }
 
 @MainActor
@@ -885,5 +1037,55 @@ private final class ClientDelegate: JCodeClientDelegate {
     func clientDidInjectSoftInterrupt(_ info: SoftInterruptInjectionInfo) {
         guard guardCurrent() else { return }
         model.onSoftInterruptInjected(info)
+    }
+
+    func clientDidStartReload(newSocket: String?) {
+        guard guardCurrent() else { return }
+        model.onReloadStarted(newSocket: newSocket)
+    }
+
+    func clientDidUpdateReloadProgress(_ info: ReloadProgressInfo) {
+        guard guardCurrent() else { return }
+        model.onReloadProgress(info)
+    }
+
+    func clientDidReceiveNotification(_ notification: JCodeNotification) {
+        guard guardCurrent() else { return }
+        model.onNotification(notification)
+    }
+
+    func clientDidUpdateSwarmStatus(members: [SwarmMemberStatus]) {
+        guard guardCurrent() else { return }
+        model.onSwarmStatus(members: members)
+    }
+
+    func clientDidUpdateMCPStatus(servers: [String]) {
+        guard guardCurrent() else { return }
+        model.onMCPStatus(servers: servers)
+    }
+
+    func clientDidInjectMemory(_ info: MemoryInjectionInfo) {
+        guard guardCurrent() else { return }
+        model.onMemoryInjected(info)
+    }
+
+    func clientDidSplitSession(_ info: SplitResponseInfo) {
+        guard guardCurrent() else { return }
+        model.onSplitSession(info)
+    }
+
+    func clientDidCompact(_ info: CompactResultInfo) {
+        guard guardCurrent() else { return }
+        model.onCompact(info)
+    }
+
+    func clientDidRequestStdin(_ info: StdinRequestInfo) {
+        guard guardCurrent() else { return }
+        model.onStdinRequest(info)
+    }
+
+    func clientDidReceiveUnknownEvent(_ info: UnknownServerEventInfo) {
+        guard guardCurrent() else { return }
+        model.onUnknownEvent(info)
     }
 }

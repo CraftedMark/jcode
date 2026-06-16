@@ -133,7 +133,10 @@ do {
     else { check(false, "Expected interrupted") }
 
     let e12 = try decodeEvent(#"{"type":"future_event","data":"stuff"}"#)
-    if case .unknown(let type, _) = e12 { assertEqual(type, "future_event") }
+    if case .unknown(let type, let raw) = e12 {
+        assertEqual(type, "future_event")
+        check(raw.contains(#""data":"stuff""#), "unknown event should keep raw payload")
+    }
     else { check(false, "Expected unknown") }
 
     let e13 = try decodeEvent(#"{"type":"session_renamed","session_id":"fox_abc123","title":"Release planning","display_title":"Release planning"}"#)

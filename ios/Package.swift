@@ -19,7 +19,7 @@ let package = Package(
             name: "JCodeKit",
             path: "Sources/JCodeKit"
         ),
-        .executableTarget(
+        .testTarget(
             name: "JCodeKitTests",
             dependencies: ["JCodeKit"],
             path: "Tests/JCodeKitTests"

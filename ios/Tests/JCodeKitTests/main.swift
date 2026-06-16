@@ -1,15 +1,26 @@
-import Foundation
+import XCTest
 @testable import JCodeKit
 
-runProtocolTests()
-runClientTests()
+final class JCodeKitHarnessTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        passed = 0
+        failed = 0
+        passed2 = 0
+        failed2 = 0
+    }
 
-let total = passed + failed + passed2 + failed2
-let totalFailed = failed + failed2
-print("\n" + String(repeating: "=", count: 40))
-if totalFailed == 0 {
-    print("TOTAL: \(total) assertions passed ✅")
-} else {
-    print("TOTAL: \(total - totalFailed) passed, \(totalFailed) FAILED ❌")
-    exit(1)
+    func testProtocolHarnessAssertions() {
+        runProtocolTests()
+
+        XCTAssertEqual(failed, 0)
+        XCTAssertGreaterThan(passed, 0)
+    }
+
+    func testClientHarnessAssertions() {
+        runClientTests()
+
+        XCTAssertEqual(failed2, 0)
+        XCTAssertGreaterThan(passed2, 0)
+    }
 }

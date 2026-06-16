@@ -138,7 +138,7 @@ public enum ServerEvent: Decodable, Sendable {
     case reloading(newSocket: String?)
     case reloadProgress(step: String, message: String, success: Bool?, output: String?)
     case modelChanged(id: UInt64, model: String, providerName: String?, error: String?)
-    case notification(Notification)
+    case notification(JCodeNotification)
     case swarmStatus(members: [SwarmMemberStatus])
     case mcpStatus(servers: [String])
     case softInterruptInjected(content: String, point: String, toolsSkipped: Int?)
@@ -255,7 +255,7 @@ public enum ServerEvent: Decodable, Sendable {
             self = .modelChanged(id: id, model: model, providerName: providerName, error: error)
 
         case "notification":
-            let notif = try Notification(from: decoder)
+            let notif = try JCodeNotification(from: decoder)
             self = .notification(notif)
 
         case "swarm_status":
@@ -302,7 +302,7 @@ public enum ServerEvent: Decodable, Sendable {
             self = .stdinRequest(requestId: requestId, prompt: prompt, isPassword: isPassword, toolCallId: toolCallId)
 
         default:
-            let raw = String(describing: try? JSONSerialization.data(withJSONObject: [:]))
+            let raw = (try? RawJSONValue(from: decoder).jsonString()) ?? "{}"
             self = .unknown(type: type, raw: raw)
         }
     }
@@ -491,7 +491,7 @@ public struct SwarmMemberStatus: Codable, Sendable {
     }
 }
 
-public struct Notification: Decodable, Sendable {
+public struct JCodeNotification: Decodable, Sendable {
     public let fromSession: String
     public let fromName: String?
     public let notificationType: NotificationType
@@ -547,5 +547,67 @@ struct DynamicCodingKey: CodingKey {
 
     static func key(_ name: String) -> DynamicCodingKey {
         DynamicCodingKey(stringValue: name)!
+    }
+}
+
+private enum RawJSONValue: Decodable {
+    case object([String: RawJSONValue])
+    case array([RawJSONValue])
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case null
+
+    init(from decoder: Decoder) throws {
+        if let container = try? decoder.container(keyedBy: DynamicCodingKey.self) {
+            var object: [String: RawJSONValue] = [:]
+            for key in container.allKeys {
+                object[key.stringValue] = try container.decode(RawJSONValue.self, forKey: key)
+            }
+            self = .object(object)
+            return
+        }
+
+        if var container = try? decoder.unkeyedContainer() {
+            var array: [RawJSONValue] = []
+            while !container.isAtEnd {
+                array.append(try container.decode(RawJSONValue.self))
+            }
+            self = .array(array)
+            return
+        }
+
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let bool = try? container.decode(Bool.self) {
+            self = .bool(bool)
+        } else if let number = try? container.decode(Double.self) {
+            self = .number(number)
+        } else {
+            self = .string(try container.decode(String.self))
+        }
+    }
+
+    func jsonString() throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: jsonObject, options: [.sortedKeys])
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+
+    private var jsonObject: Any {
+        switch self {
+        case .object(let object):
+            return object.mapValues(\.jsonObject)
+        case .array(let array):
+            return array.map(\.jsonObject)
+        case .string(let string):
+            return string
+        case .number(let number):
+            return number
+        case .bool(let bool):
+            return bool
+        case .null:
+            return NSNull()
+        }
     }
 }
